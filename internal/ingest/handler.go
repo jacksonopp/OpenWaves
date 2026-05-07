@@ -32,6 +32,15 @@ http.Error(w, "no key for station", http.StatusInternalServerError)
 return
 }
 
+if stationCfg, ok := registry[username]; ok && stationCfg.IngestKey != "" {
+authHeader := r.Header.Get("Authorization")
+expected := "Bearer " + stationCfg.IngestKey
+if authHeader != expected {
+http.Error(w, "unauthorized", http.StatusUnauthorized)
+return
+}
+}
+
 if !strings.HasSuffix(filename, ".ts") {
 http.Error(w, "filename must end in .ts", http.StatusBadRequest)
 return

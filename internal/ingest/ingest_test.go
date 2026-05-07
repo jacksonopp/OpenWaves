@@ -140,6 +140,49 @@ t.Error("expected non-empty signature")
 }
 }
 
+func TestHandler_IngestKey_Valid(t *testing.T) {
+	cfg := &config.Config{
+		Domain:       "example.com",
+		Scheme:       "https",
+		Registration: config.AdminOnly,
+		Stations:     []config.StationConfig{{Username: "alice", IngestKey: "secret"}},
+	}
+	store := hls.NewStore(10)
+	privKeys := map[string]*rsa.PrivateKey{"alice": generateKey(t)}
+
+	r := newTestRouter(cfg, store, privKeys)
+	body := bytes.NewReader([]byte("fake-ts-data"))
+	req := httptest.NewRequest(http.MethodPost, "/stations/alice/ingest/seg0001.ts", body)
+	req.Header.Set("Authorization", "Bearer secret")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Errorf("expected 201, got %d", rr.Code)
+	}
+}
+
+func TestHandler_IngestKey_Missing(t *testing.T) {
+	cfg := &config.Config{
+		Domain:       "example.com",
+		Scheme:       "https",
+		Registration: config.AdminOnly,
+		Stations:     []config.StationConfig{{Username: "alice", IngestKey: "secret"}},
+	}
+	store := hls.NewStore(10)
+	privKeys := map[string]*rsa.PrivateKey{"alice": generateKey(t)}
+
+	r := newTestRouter(cfg, store, privKeys)
+	body := bytes.NewReader([]byte("fake-ts-data"))
+	req := httptest.NewRequest(http.MethodPost, "/stations/alice/ingest/seg0001.ts", body)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", rr.Code)
+	}
+}
+
 func TestSegmentIngestor_Stop(t *testing.T) {
 store := hls.NewStore(10)
 privKeys := map[string]*rsa.PrivateKey{}

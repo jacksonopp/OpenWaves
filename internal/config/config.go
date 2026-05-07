@@ -21,6 +21,7 @@ type StationConfig struct {
 	LicenseTerritory []string `yaml:"license_territory"`
 	RelayPolicy      string   `yaml:"relay_policy"`  // "open" | "allowlist" | "closed"
 	IngestType       string   `yaml:"ingest_type"`   // "http" | "rtmp" | "ffmpeg", default "http"
+	IngestKey        string   `yaml:"ingest_key"`
 }
 
 type Config struct {
