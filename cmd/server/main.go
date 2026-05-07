@@ -31,13 +31,13 @@ func main() {
 
 	router := mux.NewRouter()
 
-	router.HandleFunc("/ns/openwave", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/ns/openwaves", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		w.Header().Set("Content-Type", "application/ld+json")
-		w.Write(static.OpenwaveContext)
+		w.Write(static.OpenWavesContext)
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/.well-known/webfinger", webfinger.Handler(cfg)).Methods(http.MethodGet)
@@ -100,7 +100,7 @@ func main() {
 		http.NotFound(w, r)
 	})
 
-	log.Printf("OpenWave server listening on :%s", port)
+	log.Printf("OpenWaves server listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, router); err != nil {
 		log.Fatalf("server error: %v", err)
 	}

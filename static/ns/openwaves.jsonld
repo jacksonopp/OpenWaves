@@ -1,6 +1,6 @@
 {
   "@context": {
-    "ow": "https://example.com/ns/openwave#",
+    "ow": "https://example.com/ns/openwaves#",
     "xsd": "http://www.w3.org/2001/XMLSchema#",
     "stationUri": {
       "@id": "ow:stationUri",

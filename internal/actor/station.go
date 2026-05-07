@@ -7,7 +7,7 @@ var Context = []interface{}{
 	"https://www.w3.org/ns/activitystreams",
 	"https://w3id.org/security/v1",
 	map[string]interface{}{
-		"ow":              "https://example.com/ns/openwave#",
+		"ow":              "https://example.com/ns/openwaves#",
 		"stationUri":      map[string]string{"@id": "ow:stationUri", "@type": "@id"},
 		"isLive":          map[string]string{"@id": "ow:isLive", "@type": "xsd:boolean"},
 		"hlsManifest":     map[string]string{"@id": "ow:hlsManifest", "@type": "@id"},

@@ -3,16 +3,22 @@
 ## ✅ 1. Define the Actor
 Create the JSON-LD schema for an OpenWaves Station.
 
-**Done.** The Station actor is implemented as an ActivityPub `Service` type in `internal/actor/station.go`, with a custom `ow:` JSON-LD namespace served at `/ns/openwave`. The HTTP server (`cmd/server/main.go`) serves actor documents at `GET /stations/{username}` and the context at `GET /ns/openwave`.
+**Done.** The Station actor is implemented as an ActivityPub `Service` type in `internal/actor/station.go`, with a custom `ow:` JSON-LD namespace served at `/ns/openwaves`. The HTTP server (`cmd/server/main.go`) serves actor documents at `GET /stations/{username}` and the context at `GET /ns/openwaves`.
 
 Core protocol features are also documented in `docs/core.md` and `README.md`, including: passive device compliance, broadcast termination signal, proof-of-listen telemetry, and license territory enforcement.
 
 ---
 
-## 2. WebFinger Discovery
+## ✅ 2. WebFinger Discovery
 Implement the `.well-known/webfinger` logic so your Station is discoverable from other Fediverse apps (Mastodon, Pleroma, etc.).
 
-The WebFinger endpoint (`GET /.well-known/webfinger?resource=acct:username@domain`) should return a JRD (JSON Resource Descriptor) linking to the Station actor URL. This is required for Fediverse interoperability.
+**Done.** The WebFinger endpoint is implemented in `internal/webfinger/webfinger.go` and served at `GET /.well-known/webfinger?resource=acct:username@domain`. It returns a JRD (JSON Resource Descriptor) with `self` and `profile-page` links pointing to the Station actor URL.
+
+Station registration is controlled by `config.yaml` at the repo root:
+- `registration: admin_only` — only stations listed in the config are resolvable (unknown usernames → 404)
+- `registration: open` — unknown usernames receive a generated stub actor
+
+The server loads config from `config.yaml` by default; override with the `CONFIG_PATH` env var.
 
 ---
 
