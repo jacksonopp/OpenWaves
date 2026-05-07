@@ -170,3 +170,95 @@ This cascades: source clears its store → sends TerminateStream to relay's inbo
 | `SCHEME` | | `http` | `http` or `https` |
 | `RELAY_POLICY` | | `open` | `open`, `allowlist`, or `closed` |
 | `KEYS_DIR` | | `keys-relay` | Directory for RSA key files |
+
+---
+
+## ✅ 5. Admin API + TUI
+
+Stream lifecycle management (start/stop without server restart) and a terminal UI for managing broadcasts and relays.
+
+**Done.** Two new components:
+
+- **`internal/admin/`** — admin REST sub-router mounted at `/admin`. Protected by `admin_key` in `config.yaml` (`Authorization: Bearer <key>` header required). Returns 403 if `admin_key` is empty (admin disabled).
+- **`cmd/tui/`** — standalone TUI binary built with Bubble Tea + Lip Gloss. Connects to the running server via the admin API, manages broadcaster subprocess, and controls stream/relay lifecycle.
+
+### Admin API endpoints
+
+All require `Authorization: Bearer <admin_key>`.
+
+| Method | Path | Action |
+|---|---|---|
+| `GET` | `/admin/stations` | List all stations with live/relay status |
+| `GET` | `/admin/stations/{username}` | Single station status |
+| `POST` | `/admin/stations/{username}/stream/stop` | Terminate stream (clears store, propagates TerminateStream to followers) |
+| `POST` | `/admin/stations/{username}/stream/start` | Reset store for a fresh ingest |
+| `POST` | `/admin/stations/{username}/relay/start` | Start relay (body: `{"source_url":"..."}`) |
+| `POST` | `/admin/stations/{username}/relay/stop` | Stop relay |
+
+Station status response:
+```json
+{"username":"morning-vibes","isLive":true,"segmentCount":8,"isRelaying":false}
+```
+
+Config: add `admin_key` to `config.yaml`:
+```yaml
+admin_key: "your-secret-key"
+```
+
+### TUI
+
+```bash
+SERVER_URL=http://localhost:8080 ADMIN_KEY=your-secret-key go run ./cmd/tui
+```
+
+**Layout:**
+```
+OpenWaves  server: http://localhost:8080
+┌─────────────────┬─────────────────────────────────────────────┐
+│ ► morning-vibes │ morning-vibes                               │
+│   ● LIVE        │ Status:    ● LIVE                           │
+│   wfmu          │ Segments:  8                                │
+│   ○ offline     │ Relay:     not relaying                     │
+│                 │ Broadcast: stopped                          │
+│                 │                                             │
+│                 │ ─── broadcast log ───                       │
+│                 │ seg0041.ts → 200 OK                         │
+└─────────────────┴─────────────────────────────────────────────┘
+esc: back  b: broadcast  B: stop broadcast  s: stop stream  ...
+```
+
+**Key bindings (detail view):**
+
+| Key | Action |
+|---|---|
+| `b` | Start broadcast (prompts for audio input, empty = script default) |
+| `B` | Stop broadcast subprocess |
+| `s` | Stop stream (terminate + propagate to relays) |
+| `S` | Start stream (clear store, ready for fresh ingest) |
+| `r` | Start relay (prompts for source URL) |
+| `x` | Stop relay |
+| `esc` | Back to station list |
+| `q` | Quit |
+
+### TUI environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `SERVER_URL` | `http://localhost:8080` | OpenWaves server to manage |
+| `ADMIN_KEY` | `` | Bearer token (must match server's `admin_key`) |
+| `BROADCAST_SCRIPT` | `./bin/broadcast.sh` | Path to the broadcast script |
+
+### Example: start/stop a stream without restarting the server
+
+```bash
+# Stop the current stream (propagates TerminateStream to all relays):
+curl -X POST http://localhost:8080/admin/stations/morning-vibes/stream/stop \
+  -H "Authorization: Bearer your-secret-key"
+
+# Clear state and allow a fresh ingest to start:
+curl -X POST http://localhost:8080/admin/stations/morning-vibes/stream/start \
+  -H "Authorization: Bearer your-secret-key"
+
+# Then run broadcast.sh again to start a new stream
+./bin/broadcast.sh morning-vibes http://localhost:8080 60
+```

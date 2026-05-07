@@ -10,6 +10,7 @@ OpenWaves is a decentralized live audio protocol for federated radio-style broad
 | 2 | WebFinger discovery | ✅ Done |
 | 3 | HLS live streaming (broadcaster-side segmentation, RSA signing) | ✅ Done |
 | 4 | Relay logic (Follow/Accept, segment polling, heartbeat, TerminateStream) | ✅ Done |
+| 5 | Admin API + TUI (stream lifecycle, relay management, terminal UI) | ✅ Done |
 
 ## Quick Start
 

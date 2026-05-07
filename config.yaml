@@ -2,6 +2,7 @@ domain: "localhost:8080"
 scheme: "http"
 registration: "open"
 keys_dir: keys
+admin_key: "secret"  # set a secret to enable the /admin API and TUI control
 
 stations:
   - username: "morning-vibes"

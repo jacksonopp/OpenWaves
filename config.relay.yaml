@@ -1,0 +1,20 @@
+domain: "localhost:8081"
+scheme: "http"
+registration: "open"
+keys_dir: keys-relay
+admin_key: "relay-secret"  # set a secret to enable the /admin API and TUI control
+
+stations:
+  - username: "relay-one"
+    name: "Relay One"
+    summary: "Relay node for OpenWaves streams."
+    license_territory: ["*"]
+    relay_policy: "open"
+    ingest_type: "http"
+
+  - username: "relay-two"
+    name: "Relay Two"
+    summary: "Second relay node for OpenWaves streams."
+    license_territory: ["*"]
+    relay_policy: "open"
+    ingest_type: "http"

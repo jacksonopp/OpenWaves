@@ -30,6 +30,7 @@ type Config struct {
 	Registration RegistrationPolicy `yaml:"registration"` // "admin_only" | "open"
 	KeysDir      string             `yaml:"keys_dir"`     // default "keys"
 	Stations     []StationConfig    `yaml:"stations"`
+	AdminKey     string             `yaml:"admin_key"` // if set, all /admin requests require Authorization: Bearer <AdminKey>
 }
 
 func LoadConfig(path string) (*Config, error) {

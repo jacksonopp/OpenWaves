@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/jacksonopp/openwaves/internal/actor"
+	"github.com/jacksonopp/openwaves/internal/admin"
 	"github.com/jacksonopp/openwaves/internal/config"
 	"github.com/jacksonopp/openwaves/internal/hls"
 	"github.com/jacksonopp/openwaves/internal/inbox"
@@ -41,7 +42,6 @@ func main() {
 
 	followerStore := inbox.NewFollowerStore()
 	relayMgr := relay.NewManager(store, privKeys)
-	_ = relayMgr // used in future admin endpoints
 
 	router := mux.NewRouter()
 
@@ -51,6 +51,8 @@ func main() {
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/.well-known/webfinger", webfinger.Handler(cfg)).Methods(http.MethodGet)
+
+	router.HandleFunc("/stations", publicStationsListHandler(cfg, store)).Methods(http.MethodGet)
 
 	router.HandleFunc("/stations/{username}", stationHandler(cfg, store, pubKeyPEMs)).Methods(http.MethodGet)
 
@@ -63,6 +65,8 @@ func main() {
 	router.HandleFunc("/stations/{username}/hls/{segment:[^/]+\\.ts}.sig", hls.SigHandler(cfg, store)).Methods(http.MethodGet)
 
 	router.HandleFunc("/stations/{username}/inbox", inbox.Handler(cfg, store, followerStore, nil)).Methods(http.MethodPost)
+
+	router.PathPrefix("/admin").Handler(admin.Handler(cfg, store, followerStore, relayMgr))
 
 	router.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
@@ -86,6 +90,34 @@ func loadKeys(cfg *config.Config) (map[string]*rsa.PrivateKey, map[string]string
 		pubKeyPEMs[station.Username] = pubPEM
 	}
 	return privKeys, pubKeyPEMs
+}
+
+func publicStationsListHandler(cfg *config.Config, store *hls.Store) http.HandlerFunc {
+	type publicStation struct {
+		Username     string `json:"username"`
+		Name         string `json:"name"`
+		Summary      string `json:"summary"`
+		IsLive       bool   `json:"isLive"`
+		SegmentCount int    `json:"segmentCount"`
+		HLSURL       string `json:"hlsUrl"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		registry := cfg.Registry()
+		stations := make([]publicStation, 0, len(registry))
+		for username, sc := range registry {
+			segs := store.Segments(username)
+			stations = append(stations, publicStation{
+				Username:     username,
+				Name:         sc.Name,
+				Summary:      sc.Summary,
+				IsLive:       len(segs) > 0,
+				SegmentCount: len(segs),
+				HLSURL:       cfg.BaseURL() + "/stations/" + username + "/hls/stream.m3u8",
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(stations)
+	}
 }
 
 func stationHandler(cfg *config.Config, store *hls.Store, pubKeyPEMs map[string]string) http.HandlerFunc {

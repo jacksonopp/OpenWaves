@@ -65,21 +65,8 @@ func Handler(cfg *config.Config, hlsStore *hls.Store, followerStore *FollowerSto
 				http.Error(w, "invalid JSON", http.StatusBadRequest)
 				return
 			}
-			hlsStore.Clear(username)
-			log.Printf("inbox: TerminateStream received from %s — cleared segments for %s", ts.Actor, username)
-
-			// Propagate to all followers so they also terminate.
-			followers := followerStore.List(username)
-			for _, f := range followers {
-				sendActivity(f.InboxURL, ts)
-			}
-			if len(followers) > 0 {
-				log.Printf("inbox: propagated TerminateStream to %d follower(s) of %s", len(followers), username)
-			}
-
-			if onTerminate != nil {
-				onTerminate(username)
-			}
+			log.Printf("inbox: TerminateStream received from %s — clearing segments for %s", ts.Actor, username)
+			TerminateStation(username, hlsStore, followerStore, onTerminate)
 			w.WriteHeader(http.StatusOK)
 		default:
 			w.WriteHeader(http.StatusAccepted)
