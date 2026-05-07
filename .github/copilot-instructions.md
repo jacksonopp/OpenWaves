@@ -26,13 +26,16 @@ CONFIG_PATH=./config.yaml PORT=8080 go run ./cmd/server
 
 ## Architecture
 
-The server is a single binary (`cmd/server/main.go`) that wires together three internal packages and serves HTTP via Gorilla Mux:
+The server is a single binary (`cmd/server/main.go`) that wires together internal packages and serves HTTP via Gorilla Mux:
 
 ```
-cmd/server/main.go          — entry point, route registration, config loading
+cmd/server/main.go          — entry point, route registration, config + keystore loading
 internal/actor/             — Station struct + JSON-LD context (the ActivityPub actor model)
 internal/config/            — YAML config loading, station registry, registration policy
 internal/webfinger/         — /.well-known/webfinger handler
+internal/keystore/          — RSA-2048 key pair generation + persistence (keys/ dir)
+internal/hls/               — segment store, manifest builder, signer, HTTP handlers
+internal/ingest/            — SegmentIngestor (broadcaster runs FFmpeg locally → bin/broadcast.sh POSTs each segment → server signs + stores)
 static/                     — embeds static/ns/openwaves.jsonld into the binary
 ```
 
@@ -40,10 +43,18 @@ static/                     — embeds static/ns/openwaves.jsonld into the binar
 
 **Station registry**: Stations are defined in `config.yaml`. At runtime, `cfg.Registry()` returns a `map[string]StationConfig`. The server's `registration` field controls behavior for unknown usernames: `admin_only` → 404, `open` → generate a stub actor.
 
+**Key lifecycle**: On startup, `loadKeys(cfg)` calls `keystore.LoadOrGenerate` for each admin station. Keys are persisted to `keys/<username>.pem` (private) and `keys/<username>.pub.pem` (public). The public key PEM is injected into the Station actor's `publicKey.publicKeyPem` field.
+
+**Live status**: The Station actor's `isLive` and `broadcastStatus` fields are derived at request time from `store.Segments(username)`. No separate state tracking needed.
+
 **HTTP routes**:
 - `GET /stations/{username}` — ActivityPub Station actor (`application/activity+json`)
 - `GET /.well-known/webfinger?resource=acct:username@domain` — WebFinger JRD (`application/jrd+json`)
 - `GET /ns/openwaves` — JSON-LD context document (`application/ld+json`)
+- `POST /stations/{username}/ingest/{filename}` — broadcaster POSTs a single `.ts` segment; server signs + stores it
+- `GET /stations/{username}/hls/stream.m3u8` — live HLS playlist (`application/vnd.apple.mpegurl`)
+- `GET /stations/{username}/hls/{segment}` — `.ts` segment bytes (`video/mp2t`)
+- `GET /stations/{username}/hls/{segment}.sig` — RSA signature sidecar (`application/octet-stream`)
 
 ## Key Conventions
 
@@ -53,7 +64,11 @@ static/                     — embeds static/ns/openwaves.jsonld into the binar
 
 **`//go:embed` constraint**: Embedded files must be direct children of the package directory containing `embed.go`. The `static/` package exists solely to satisfy this constraint — `static/ns/openwaves.jsonld` is embedded and exported as `static.OpenWavesContext []byte`.
 
-**Config is the source of truth**: `PublicKeyPem` is currently an empty string placeholder in the actor handler. RSA key generation/storage is not yet implemented. Do not build features that assume a populated public key without first implementing key management.
+**Handler factory pattern**: All handlers use `func Handler(...) http.HandlerFunc`. The station actor handler is the only acceptable inline closure in `main.go`. New routes must be implemented as factory functions in their own package under `internal/`.
+
+**HLS segment signing**: Each `.ts` segment is signed with RSA-PKCS1v15/SHA-256 using the station's private key. The signature is served as a sidecar at `{segment}.sig`. Use `hls.Sign(priv, data)` and `hls.Verify(pubPEM, data, sig)` — do not re-implement signing logic.
+
+**FFmpeg dependency**: FFmpeg must be installed on the **broadcaster's machine** and is invoked by `bin/broadcast.sh`. The server does not run FFmpeg. Tests do not test FFmpeg directly — unit tests mock at the handler level.
 
 **`licenseTerritory`**: An array of ISO 3166-1 alpha-2 country codes. The special value `["*"]` means worldwide. Relay servers MUST check this before accepting a stream. This is protocol-level enforcement, not optional.
 
@@ -70,7 +85,7 @@ These are hard protocol requirements, not preferences:
 
 - ✅ Step 1: Station actor JSON-LD schema
 - ✅ Step 2: WebFinger discovery
-- ⬜ Step 3: HLS implementation (FFmpeg segmentation + per-chunk RSA signing)
+- ✅ Step 3: HLS implementation (broadcaster-side FFmpeg → bin/broadcast.sh POSTs segments → server signs + stores, RSA keystore)
 - ⬜ Step 4: Relay logic (Follow-based subscription, territory check, heartbeat, TerminateStream)
 
-**Prerequisites for Steps 3/4**: RSA key pair generation + storage, ActivityPub inbox handler (`POST /stations/{username}/inbox`).
+**Prerequisites for Step 4**: ActivityPub inbox handler (`POST /stations/{username}/inbox`) to receive Follow and TerminateStream activities.
