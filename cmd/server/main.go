@@ -8,14 +8,25 @@ import (
 	"os"
 
 	"github.com/gorilla/mux"
-	"github.com/jacksonopp/openwave/internal/actor"
-	"github.com/jacksonopp/openwave/static"
+	"github.com/jacksonopp/openwaves/internal/actor"
+	"github.com/jacksonopp/openwaves/internal/config"
+	"github.com/jacksonopp/openwaves/internal/webfinger"
+	"github.com/jacksonopp/openwaves/static"
 )
 
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
+	}
+
+	configPath := os.Getenv("CONFIG_PATH")
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
 	}
 
 	router := mux.NewRouter()
@@ -29,6 +40,8 @@ func main() {
 		w.Write(static.OpenwaveContext)
 	}).Methods(http.MethodGet)
 
+	router.HandleFunc("/.well-known/webfinger", webfinger.Handler(cfg)).Methods(http.MethodGet)
+
 	router.HandleFunc("/stations/{username}", func(w http.ResponseWriter, r *http.Request) {
 		username := mux.Vars(r)["username"]
 		if username == "" {
@@ -36,14 +49,24 @@ func main() {
 			return
 		}
 
-		host := r.Host
-		if host == "" {
-			host = "localhost:8080"
-		}
-		scheme := "http"
-		base := fmt.Sprintf("%s://%s/stations/%s", scheme, host, username)
+		base := cfg.BaseURL() + "/stations/" + username
 
-		s := actor.NewStation(base, username, username)
+		registry := cfg.Registry()
+		stationCfg, found := registry[username]
+
+		if !found && cfg.Registration == config.AdminOnly {
+			http.NotFound(w, r)
+			return
+		}
+
+		var name string
+		if found {
+			name = stationCfg.Name
+		} else {
+			name = username
+		}
+
+		s := actor.NewStation(base, name, username)
 		s.URL = base
 		s.Inbox = base + "/inbox"
 		s.Outbox = base + "/outbox"
@@ -54,7 +77,13 @@ func main() {
 			Owner:        base,
 			PublicKeyPem: "",
 		}
-		s.StationURI = fmt.Sprintf("openwaves://%s@%s", username, host)
+		s.StationURI = fmt.Sprintf("openwaves://%s@%s", username, cfg.Domain)
+
+		if found {
+			s.Summary = stationCfg.Summary
+			s.LicenseTerritory = stationCfg.LicenseTerritory
+			s.RelayPolicy = actor.RelayPolicy(stationCfg.RelayPolicy)
+		}
 
 		data, err := json.Marshal(s)
 		if err != nil {

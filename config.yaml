@@ -1,0 +1,16 @@
+domain: "localhost:8080"
+scheme: "http"
+registration: "admin_only"
+
+stations:
+  - username: "morning-vibes"
+    name: "Morning Vibes Radio"
+    summary: "Indie folk and acoustic sets, live every morning."
+    license_territory: ["US", "CA"]
+    relay_policy: "open"
+
+  - username: "wfmu"
+    name: "WFMU"
+    summary: "Freeform radio from Jersey City, NJ. Listener-supported."
+    license_territory: ["*"]
+    relay_policy: "open"
