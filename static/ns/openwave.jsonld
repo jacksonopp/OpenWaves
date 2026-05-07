@@ -32,6 +32,11 @@
     "relayPolicy": {
       "@id": "ow:relayPolicy",
       "@comment": "Values: open | allowlist | closed"
+    },
+    "licenseTerritory": {
+      "@id": "ow:licenseTerritory",
+      "@container": "@set",
+      "@comment": "ISO 3166-1 alpha-2 country codes; [\"*\"] means worldwide"
     }
   }
 }

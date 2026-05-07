@@ -15,7 +15,8 @@ var Context = []interface{}{
 		"broadcastStatus": map[string]string{"@id": "ow:broadcastStatus"},
 		"audioCodec":      map[string]string{"@id": "ow:audioCodec"},
 		"bitrate":         map[string]string{"@id": "ow:bitrate", "@type": "xsd:integer"},
-		"relayPolicy":     map[string]string{"@id": "ow:relayPolicy"},
+		"relayPolicy":      map[string]string{"@id": "ow:relayPolicy"},
+		"licenseTerritory": map[string]string{"@id": "ow:licenseTerritory"},
 	},
 }
 
@@ -49,6 +50,8 @@ type Station struct {
 	AudioCodec      string          `json:"audioCodec,omitempty"`
 	Bitrate         int             `json:"bitrate,omitempty"`
 	RelayPolicy     RelayPolicy     `json:"relayPolicy,omitempty"` // "open" | "allowlist" | "closed"
+	// ISO 3166-1 alpha-2 country codes; ["*"] means worldwide
+	LicenseTerritory []string `json:"licenseTerritory,omitempty"`
 }
 
 // NewStation creates a Station pre-populated with the standard JSON-LD context and type.

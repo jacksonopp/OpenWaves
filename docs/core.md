@@ -6,6 +6,8 @@ Bandwidth Scaling: Server B can follow Server A and act as a "repeater," pulling
 
 Reduced Source Load: The original broadcaster only needs enough bandwidth to reach a few federated peers, rather than thousands of individual listeners.
 
+License Territory Enforcement: Each station actor includes a `licenseTerritory` field containing an array of ISO 3166-1 alpha-2 country codes (e.g. `["US", "CA"]`); the special value `["*"]` means worldwide. Before a relay server accepts and re-hosts a stream, it MUST check this field against its own declared jurisdiction. If the relay's jurisdiction is not in the list, it MUST refuse to relay that stream.
+
 ## 2. Ephemeral-by-Default Architecture
 Designed for live moments, not permanent archives.
 
@@ -33,3 +35,21 @@ Built-in tools to handle the legal and social risks of decentralized broadcastin
 Defederation Signals: Admins can "mute" or "block" specific federated streams at the relay level if they contain infringing or illegal content.
 
 Source Attribution: Every audio chunk is cryptographically signed by the originating server to prevent "stream spoofing" or impersonation.
+
+Broadcast Termination Signal: The source server can broadcast a signed `TerminateStream` ActivityPub activity to its followers collection at any time. Relay servers that receive this activity MUST immediately cease serving that stream, purge any buffered segments, and propagate the signal to their own downstream relay followers — enabling a cascading shutdown across the relay graph. A short grace window of 5 seconds is allowed to complete any in-flight segment requests before purging.
+
+## 6. Passive Device Compliance
+OpenWaves relay servers are designed to function as passive transmission devices — analogous to how the FCC classifies cable retransmission equipment — rather than as active content retransmitters.
+
+Relays MUST NOT: re-encode or transcode audio, inject advertisements, alter HLS segment content, or modify stream metadata fields.
+
+Relays MAY: buffer segments temporarily for local fan-out, serve those segments to local listeners, and enforce defederation by dropping a stream entirely.
+
+The cryptographic signatures applied to each audio chunk by the originating server serve as the technical enforcement mechanism: any relay that modifies segment content will produce chunks that fail signature verification at the listener's client, breaking the stream.
+
+## 7. Proof-of-Listen Telemetry
+Each relay server is required to send a cryptographically signed heartbeat back to the source server at a regular interval (every 30 seconds) while actively relaying a stream.
+
+The heartbeat payload includes: `relayId` (the relay's ActivityPub actor URL), `streamId` (the stream being relayed), `listenerCount` (aggregate number of active listeners on that relay), `timestamp`, and a `signature` generated using the relay's ActivityPub HTTP Signature private key.
+
+Heartbeats report aggregate listener counts only and never include individual listener identities or connection metadata. The source server uses these heartbeats to build a real-time aggregate listener count across the relay graph. A relay that stops sending heartbeats for more than 60 seconds is considered offline by the source.

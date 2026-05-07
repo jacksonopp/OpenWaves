@@ -39,6 +39,72 @@ func TestStationMarshalRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStationLicenseTerritoryRoundTrip(t *testing.T) {
+	s := NewStation("https://example.com/users/kexp", "KEXP", "kexp")
+	s.LicenseTerritory = []string{"US", "CA", "GB"}
+
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var decoded Station
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if len(decoded.LicenseTerritory) != 3 {
+		t.Fatalf("LicenseTerritory length: got %d, want 3", len(decoded.LicenseTerritory))
+	}
+	want := map[string]bool{"US": true, "CA": true, "GB": true}
+	for _, v := range decoded.LicenseTerritory {
+		if !want[v] {
+			t.Errorf("unexpected territory %q", v)
+		}
+		delete(want, v)
+	}
+	for k := range want {
+		t.Errorf("missing territory %q", k)
+	}
+}
+
+func TestStationLicenseTerritoryOmitempty(t *testing.T) {
+	s := NewStation("https://example.com/users/kexp", "KEXP", "kexp")
+
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if _, ok := raw["licenseTerritory"]; ok {
+		t.Error("licenseTerritory should be omitted when nil, but it was present")
+	}
+}
+
+func TestStationLicenseTerritoryWorldwide(t *testing.T) {
+	s := NewStation("https://example.com/users/kexp", "KEXP", "kexp")
+	s.LicenseTerritory = []string{"*"}
+
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var decoded Station
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if len(decoded.LicenseTerritory) != 1 || decoded.LicenseTerritory[0] != "*" {
+		t.Errorf("LicenseTerritory: got %v, want [\"*\"]", decoded.LicenseTerritory)
+	}
+}
+
 func TestStationContextField(t *testing.T) {
 	s := NewStation("https://example.com/users/wfmu", "WFMU", "wfmu")
 
