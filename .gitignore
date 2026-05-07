@@ -18,3 +18,4 @@ cmd/server/__debug*
 
 # Keys directory
 keys/
+keys-*/

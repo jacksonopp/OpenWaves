@@ -23,17 +23,18 @@ The server loads config from `config.yaml` by default; override with the `CONFIG
 ---
 
 ## ✅ 3. HLS Implementation
-Build the core logic that takes an audio input (likely via FFmpeg) and segments it into the HLS `.m3u8` format.
+Build the core logic that segments audio into HLS `.m3u8` format and serves it with cryptographic signatures.
 
-**Done.** The HLS pipeline is fully implemented across four new packages:
+**Done.** The HLS pipeline is fully implemented across four packages:
 
-- **`internal/keystore/`** — RSA-2048 key pairs generated per station on first run, persisted to `keys/<username>.pem` and `keys/<username>.pub.pem`. The public key is now populated in the Station actor document at `publicKey.publicKeyPem`.
+- **`internal/keystore/`** — RSA-2048 key pairs generated per station on first run, persisted to `keys/<username>.pem` and `keys/<username>.pub.pem`. The public key is populated in the Station actor document at `publicKey.publicKeyPem`.
 - **`internal/hls/`** — Thread-safe in-memory segment ring buffer (`Store`, last 10 segments), live `.m3u8` manifest builder, RSA-PKCS1v15/SHA-256 segment signer, and three HTTP handler factories (`ManifestHandler`, `SegmentHandler`, `SigHandler`).
-- **`internal/ingest/`** — `Ingestor` interface with `HTTPIngestor` implementation. A broadcaster POSTs a raw audio stream to `/stations/{username}/ingest`; the server pipes it through FFmpeg to produce HLS `.ts` segments, signs each one, and stores it in the ring buffer.
+- **`internal/ingest/`** — `SegmentIngestor` accepts individual `.ts` segments POSTed by the broadcaster, signs each one, and stores it in the ring buffer. **FFmpeg runs on the broadcaster's machine, not the server.**
+- **`bin/broadcast.sh`** — broadcaster-side client script. Runs FFmpeg locally to produce `.ts` segments and POSTs each new segment to the server as it appears.
 
 New routes:
 ```
-POST /stations/{username}/ingest              — broadcaster pushes raw audio (any format FFmpeg understands)
+POST /stations/{username}/ingest/{filename}   — broadcaster POSTs a single .ts segment
 GET  /stations/{username}/hls/stream.m3u8     — live HLS playlist
 GET  /stations/{username}/hls/{segment}       — .ts segment bytes
 GET  /stations/{username}/hls/{segment}.sig   — RSA signature for the segment
@@ -43,9 +44,36 @@ The Station actor's `isLive` and `broadcastStatus` fields are updated dynamicall
 
 Config additions in `config.yaml`:
 - `keys_dir: keys` — where key pairs are stored (gitignored)
-- `ingest_type: http` per station — ingest method (`http` implemented; `rtmp` and `ffmpeg` are future TODOs)
 
-FFmpeg must be installed and on PATH for the ingest pipeline to work.
+### Testing
+
+1. **Start the server:**
+   ```bash
+   go run ./cmd/server
+   ```
+
+2. **Broadcast a test tone** (built-in FFmpeg test signal, 60-second duration):
+   ```bash
+   ./bin/broadcast.sh morning-vibes http://localhost:8080 60
+   ```
+
+3. **Broadcast real audio on macOS:**
+
+   List available audio input devices:
+   ```bash
+   ffmpeg -f avfoundation -list_devices true -i "" 2>&1 | grep -A20 "audio devices"
+   ```
+
+   Start broadcasting from a device (replace `N` with the device index):
+   ```bash
+   AUDIO_INPUT="-f avfoundation -i none:N" ./bin/broadcast.sh morning-vibes
+   ```
+   > **Note:** Do NOT quote the device specifier inside `AUDIO_INPUT`. The variable is word-split intentionally when passed to FFmpeg.
+
+4. **Connect a listener** (wait ~12 seconds for the first segments to appear):
+   ```bash
+   ffplay http://localhost:8080/stations/morning-vibes/hls/stream.m3u8
+   ```
 
 ---
 

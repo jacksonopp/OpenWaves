@@ -12,8 +12,10 @@ import (
 	"github.com/jacksonopp/openwaves/internal/actor"
 	"github.com/jacksonopp/openwaves/internal/config"
 	"github.com/jacksonopp/openwaves/internal/hls"
+	"github.com/jacksonopp/openwaves/internal/inbox"
 	"github.com/jacksonopp/openwaves/internal/ingest"
 	"github.com/jacksonopp/openwaves/internal/keystore"
+	"github.com/jacksonopp/openwaves/internal/relay"
 	"github.com/jacksonopp/openwaves/internal/webfinger"
 	"github.com/jacksonopp/openwaves/static"
 )
@@ -37,6 +39,10 @@ func main() {
 
 	store := hls.NewStore(10)
 
+	followerStore := inbox.NewFollowerStore()
+	relayMgr := relay.NewManager(store, privKeys)
+	_ = relayMgr // used in future admin endpoints
+
 	router := mux.NewRouter()
 
 	router.HandleFunc("/ns/openwaves", func(w http.ResponseWriter, r *http.Request) {
@@ -52,9 +58,11 @@ func main() {
 
 	router.HandleFunc("/stations/{username}/hls/stream.m3u8", hls.ManifestHandler(cfg, store, 6)).Methods(http.MethodGet)
 
-	router.HandleFunc("/stations/{username}/hls/{segment}", hls.SegmentHandler(cfg, store)).Methods(http.MethodGet)
+	router.HandleFunc("/stations/{username}/hls/{segment:[^/]+\\.ts}", hls.SegmentHandler(cfg, store)).Methods(http.MethodGet)
 
-	router.HandleFunc("/stations/{username}/hls/{segment}.sig", hls.SigHandler(cfg, store)).Methods(http.MethodGet)
+	router.HandleFunc("/stations/{username}/hls/{segment:[^/]+\\.ts}.sig", hls.SigHandler(cfg, store)).Methods(http.MethodGet)
+
+	router.HandleFunc("/stations/{username}/inbox", inbox.Handler(cfg, store, followerStore, nil)).Methods(http.MethodPost)
 
 	router.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
