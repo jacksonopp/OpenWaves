@@ -19,13 +19,15 @@ type StationConfig struct {
 	Name             string   `yaml:"name"`
 	Summary          string   `yaml:"summary"`
 	LicenseTerritory []string `yaml:"license_territory"`
-	RelayPolicy      string   `yaml:"relay_policy"` // "open" | "allowlist" | "closed"
+	RelayPolicy      string   `yaml:"relay_policy"`  // "open" | "allowlist" | "closed"
+	IngestType       string   `yaml:"ingest_type"`   // "http" | "rtmp" | "ffmpeg", default "http"
 }
 
 type Config struct {
 	Domain       string             `yaml:"domain"`
 	Scheme       string             `yaml:"scheme"`       // "http" | "https"
 	Registration RegistrationPolicy `yaml:"registration"` // "admin_only" | "open"
+	KeysDir      string             `yaml:"keys_dir"`     // default "keys"
 	Stations     []StationConfig    `yaml:"stations"`
 }
 
@@ -48,6 +50,9 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.Registration == "" {
 		cfg.Registration = AdminOnly
+	}
+	if cfg.KeysDir == "" {
+		cfg.KeysDir = "keys"
 	}
 
 	return &cfg, nil

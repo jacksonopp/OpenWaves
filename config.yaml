@@ -1,6 +1,7 @@
 domain: "localhost:8080"
 scheme: "http"
 registration: "open"
+keys_dir: keys
 
 stations:
   - username: "morning-vibes"
@@ -8,9 +9,11 @@ stations:
     summary: "Indie folk and acoustic sets, live every morning."
     license_territory: ["US", "CA"]
     relay_policy: "open"
+    ingest_type: "http"
 
   - username: "wfmu"
     name: "WFMU"
     summary: "Freeform radio from Jersey City, NJ. Listener-supported."
     license_territory: ["*"]
     relay_policy: "open"
+    ingest_type: "http"

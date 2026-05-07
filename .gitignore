@@ -15,3 +15,6 @@ cmd/server/__debug*
 
 # OS files
 .DS_Store
+
+# Keys directory
+keys/
