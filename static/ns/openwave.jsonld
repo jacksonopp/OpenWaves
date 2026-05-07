@@ -1,0 +1,37 @@
+{
+  "@context": {
+    "ow": "https://example.com/ns/openwave#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "stationUri": {
+      "@id": "ow:stationUri",
+      "@type": "@id"
+    },
+    "isLive": {
+      "@id": "ow:isLive",
+      "@type": "xsd:boolean"
+    },
+    "hlsManifest": {
+      "@id": "ow:hlsManifest",
+      "@type": "@id"
+    },
+    "streamExpiry": {
+      "@id": "ow:streamExpiry",
+      "@type": "xsd:dateTime"
+    },
+    "broadcastStatus": {
+      "@id": "ow:broadcastStatus",
+      "@comment": "Values: offline | live | scheduled"
+    },
+    "audioCodec": {
+      "@id": "ow:audioCodec"
+    },
+    "bitrate": {
+      "@id": "ow:bitrate",
+      "@type": "xsd:integer"
+    },
+    "relayPolicy": {
+      "@id": "ow:relayPolicy",
+      "@comment": "Values: open | allowlist | closed"
+    }
+  }
+}

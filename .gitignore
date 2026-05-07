@@ -1,0 +1,17 @@
+# Binaries
+bin/
+cmd/server/__debug*
+*.exe
+*.test
+*.out
+
+# Go coverage
+.coverprofile
+
+# IDEs and editor files
+.vscode/*
+!.vscode/launch.json
+.idea/
+
+# OS files
+.DS_Store
