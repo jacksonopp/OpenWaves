@@ -2,6 +2,50 @@
 
 OpenWaves is a decentralized live audio protocol for federated radio-style broadcasting. It is designed for live moments, not long-term archives, and uses the Fediverse for discovery, signaling, and control.
 
+## Implementation Status
+
+| Step | Feature | Status |
+|---|---|---|
+| 1 | Station actor JSON-LD schema | ✅ Done |
+| 2 | WebFinger discovery | ✅ Done |
+| 3 | HLS live streaming (broadcaster-side segmentation, RSA signing) | ✅ Done |
+| 4 | Relay logic (Follow/Accept, segment polling, heartbeat, TerminateStream) | ✅ Done |
+
+## Quick Start
+
+**Source server:**
+```bash
+go run ./cmd/server              # listens on :8080
+```
+
+**Relay server** (no config file needed):
+```bash
+SOURCE_URL=http://localhost:8080/stations/morning-vibes \
+LOCAL_USERNAME=morning-vibes \
+PORT=8081 \
+go run ./cmd/relay
+```
+
+**Broadcaster:**
+```bash
+# Test tone
+./bin/broadcast.sh morning-vibes http://localhost:8080 60
+
+# Loop an MP3
+AUDIO_INPUT="-stream_loop -1 -i /path/to/file.mp3" ./bin/broadcast.sh morning-vibes http://localhost:8080 3600
+
+# macOS microphone (replace N with device index from: ffmpeg -f avfoundation -list_devices true -i "")
+AUDIO_INPUT="-f avfoundation -i none:N" ./bin/broadcast.sh morning-vibes
+```
+
+**Listener:**
+```bash
+ffplay http://localhost:8080/stations/morning-vibes/hls/stream.m3u8   # direct
+ffplay http://localhost:8081/stations/morning-vibes/hls/stream.m3u8   # via relay
+```
+
+See `docs/get-started.md` for full implementation details and `docs/core.md` for protocol specification.
+
 ## Core protocol features
 
 ### Federated audio relay

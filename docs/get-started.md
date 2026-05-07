@@ -77,9 +77,96 @@ Config additions in `config.yaml`:
 
 ---
 
-## 4. The Relay Logic
+## ✅ 4. The Relay Logic
 This is the most unique feature. Build the code that allows Server B to subscribe to and re-host HLS segments from Server A, implementing:
 
 - License territory check before accepting a stream
 - Proof-of-listen heartbeat (signed, every 30s) back to the source
 - Broadcast termination signal handling (`TerminateStream` ActivityPub activity) with cascading shutdown
+
+**Done.** The relay system is implemented across three new packages and a standalone binary:
+
+- **`internal/activity/`** — ActivityPub activity structs: `Activity`, `Accept`, `Reject`, `ProofOfListen` (with `SignableString()` for canonical signing), `TerminateStream`.
+- **`internal/inbox/`** — `POST /stations/{username}/inbox` handler. Dispatches on activity type:
+  - `Follow` — fetches the remote actor, checks `relay_policy` (`closed` → send Reject; `open`/`allowlist` → store follower, send Accept)
+  - `TerminateStream` — clears the local segment store, calls `onTerminate` callback (relay uses this to stop its poller), and **propagates the signal to all followers** for cascading shutdown
+  - `ProofOfListen` — logs aggregate listener count and timestamp
+  - Unknown types → 202 Accepted
+- **`internal/relay/`** — Active relay session manager:
+  - `Manager` — mutex-guarded session map; `StartRelay`, `StopRelay`, `IsRelaying`
+  - `Session` — wraps a context + done channel; starts two goroutines on `start()`
+  - `poller.go` — polls `{sourceURL}/hls/stream.m3u8` every 3s, downloads new segments + `.sig` sidecars, RSA-verifies each segment against the source's public key, stores in local `hls.Store`
+  - `heartbeat.go` — sends a signed `ProofOfListen` POST to `{sourceURL}/inbox` every 30s with the real-time listener count
+  - Listener tracking: each manifest poll from a unique client IP is counted; heartbeats report the number of unique IPs active in the last 35 seconds
+- **`cmd/relay/main.go`** — standalone relay server binary configured entirely via environment variables (no `config.yaml` required)
+
+New routes (on both source and relay servers):
+```
+POST /stations/{username}/inbox   — ActivityPub inbox (Follow, TerminateStream, ProofOfListen)
+```
+
+Relay server routes:
+```
+GET /stations/{username}                      — relay station actor (publicKey for verification)
+POST /stations/{username}/inbox               — inbox with onTerminate → StopRelay
+GET /stations/{username}/hls/stream.m3u8      — relay serves live manifest to local listeners
+GET /stations/{username}/hls/{segment}        — relay serves verified segment bytes
+GET /stations/{username}/hls/{segment}.sig    — relay serves signature sidecar
+```
+
+Config additions in `config.yaml` per station:
+- `relay_policy: open | allowlist | closed` — controls whether Follow requests are accepted
+- `ingest_key: <secret>` — if set, requires `Authorization: Bearer <secret>` header on all ingest POSTs
+
+### Testing Two Servers
+
+**Terminal 1 — source server:**
+```bash
+go run ./cmd/server
+```
+
+**Terminal 2 — relay server:**
+```bash
+SOURCE_URL=http://localhost:8080/stations/morning-vibes \
+LOCAL_USERNAME=morning-vibes \
+PORT=8081 \
+go run ./cmd/relay
+```
+
+**Terminal 3 — broadcaster (test tone for 60s):**
+```bash
+./bin/broadcast.sh morning-vibes http://localhost:8080 60
+```
+
+**Terminal 3 — broadcaster (loop an MP3 indefinitely):**
+```bash
+AUDIO_INPUT="-stream_loop -1 -i /path/to/file.mp3" ./bin/broadcast.sh morning-vibes http://localhost:8080 3600
+```
+
+**Terminal 4 — listener via relay:**
+```bash
+ffplay http://localhost:8081/stations/morning-vibes/hls/stream.m3u8
+```
+
+The relay polls the source every 3 seconds, verifies each segment cryptographically, and re-serves it. The listener count appears in the source server logs (`ProofOfListen listenerCount=N`) every 30 seconds.
+
+**To terminate the stream:**
+```bash
+curl -X POST http://localhost:8080/stations/morning-vibes/inbox \
+  -H "Content-Type: application/activity+json" \
+  -d '{"type":"TerminateStream","actor":"http://localhost:8080/stations/morning-vibes","object":"http://localhost:8080/stations/morning-vibes"}'
+```
+
+This cascades: source clears its store → sends TerminateStream to relay's inbox → relay stops its poller and clears its store → ffplay disconnects.
+
+### Relay environment variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `SOURCE_URL` | ✅ | — | Full base URL of the remote station to relay |
+| `LOCAL_USERNAME` | ✅ | — | Username for this relay station |
+| `PORT` | | `8081` | Port to listen on |
+| `DOMAIN` | | `localhost:<PORT>` | Public hostname (used in actor URLs) |
+| `SCHEME` | | `http` | `http` or `https` |
+| `RELAY_POLICY` | | `open` | `open`, `allowlist`, or `closed` |
+| `KEYS_DIR` | | `keys-relay` | Directory for RSA key files |
