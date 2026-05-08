@@ -1,20 +1,38 @@
 # OpenWaves — Next Steps
 
-This document outlines the planned work after completing the core protocol implementation (Steps 1–5).
+This document outlines the planned work after completing the core protocol implementation (Steps 1–6).
 
 ---
 
-## 6. Admin Web UI + Docker Packaging
+## ✅ 6. Admin Web UI
 
-The TUI is a developer/testing tool only. The real production distribution will be a Docker image containing the server and a browser-based admin UI.
-
-- **Admin Web UI** — Replace (or supplement) the TUI with a web interface served by the existing Go server. Likely a lightweight SPA (React or plain HTML/JS) embedded into the binary via `//go:embed`. Should expose the same operations as the TUI: view station status, start/stop streams, start/stop relays, and view broadcast logs.
-- **Docker image** — Single image containing the compiled Go binary. Config via environment variables or mounted `config.yaml`. Should publish to a container registry.
-- **Client/User UI** — Separate application (web or native) for listeners. Discovers stations via WebFinger, renders the HLS stream, displays metadata (station name, `isLive`, listener count). This is a separate deliverable from the admin UI.
+**Done.** A React + Vite SPA is embedded in the Go binary and served at `/admin/ui/`. It exposes all station management operations (view status, start/stop streams and relays, manage ingest subprocesses, view live log feed) through a browser interface. See `internal/adminui/`, `internal/broadcaster/`, and `ui/` for the implementation, and `docs/get-started.md § 6` for the full build and dev workflow.
 
 ---
 
-## 7. Announce Activity (Go-Live Notifications)
+## 7. Docker Packaging
+
+Package the server as a single Docker image for production distribution.
+
+- Single image containing the compiled Go binary and embedded admin UI (no external assets needed)
+- Config via environment variables or a mounted `config.yaml`
+- Publish to a container registry
+- Document a minimal `docker-compose.yml` for source + relay setups
+
+---
+
+## 8. Client/User UI
+
+A separate application for listeners (not admins).
+
+- Discovers stations via WebFinger
+- Renders the HLS stream in-browser
+- Displays station metadata (`isLive`, listener count, station name)
+- This is a separate deliverable from the admin UI
+
+---
+
+## 9. Announce Activity (Go-Live Notifications)
 
 When a station transitions from offline to live (first segment received after a period of inactivity), the server should publish an `Announce` activity to all followers' inboxes, containing the HLS manifest URL.
 
@@ -26,7 +44,7 @@ This enables Mastodon/Pleroma users who follow a station to receive a toot-style
 
 ---
 
-## 8. HTTP Signature Verification on Inbox
+## 10. HTTP Signature Verification on Inbox
 
 The inbox currently accepts any POST without verifying the sender's identity. A malicious actor could send arbitrary `Follow` or `ProofOfListen` activities.
 
@@ -38,7 +56,7 @@ The inbox currently accepts any POST without verifying the sender's identity. A 
 
 ---
 
-## 9. Persistent Follower Store
+## 11. Persistent Follower Store
 
 The follower store is currently in-memory. If the server restarts, all relay subscriptions are lost — relays would need to re-send `Follow` activities to reconnect.
 
@@ -49,7 +67,7 @@ The follower store is currently in-memory. If the server restarts, all relay sub
 
 ---
 
-## 10. Allowlist Relay Policy
+## 12. Allowlist Relay Policy
 
 The `relay_policy: allowlist` config value is defined but not enforced — it currently behaves the same as `open`. 
 
@@ -59,7 +77,7 @@ The `relay_policy: allowlist` config value is defined but not enforced — it cu
 
 ---
 
-## 11. Defederation Controls
+## 13. Defederation Controls
 
 The protocol spec (`docs/core.md`) describes defederation — admins muting or blocking specific federated streams. Not yet implemented.
 

@@ -13,7 +13,14 @@ export default function HLSPlayer({ src }: Props) {
     if (!audio) return;
 
     if (Hls.isSupported()) {
-      const hls = new Hls();
+      const hls = new Hls({
+        // Start playback close to the live edge, not the oldest buffered segment.
+        liveSyncDurationCount: 1,
+        // Resync if playback falls more than 3 segments behind the live edge.
+        liveMaxLatencyDurationCount: 3,
+        // Discard played segments immediately so the user cannot rewind.
+        liveBackBufferLength: 0,
+      });
       hls.loadSource(src);
       hls.attachMedia(audio as unknown as HTMLMediaElement);
       return () => hls.destroy();

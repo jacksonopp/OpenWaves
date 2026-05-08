@@ -8,7 +8,13 @@ export interface StationStatus {
 }
 
 export class AdminClient {
-  constructor(private adminKey: string, private baseURL = '') {}
+  private adminKey: string;
+  private baseURL: string;
+
+  constructor(adminKey: string, baseURL = '') {
+    this.adminKey = adminKey;
+    this.baseURL = baseURL;
+  }
 
   private headers(): HeadersInit {
     return { 'Authorization': `Bearer ${this.adminKey}`, 'Content-Type': 'application/json' };

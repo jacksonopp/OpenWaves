@@ -216,16 +216,19 @@ All require `Authorization: Bearer <admin_key>`.
 
 | Method | Path | Action |
 |---|---|---|
-| `GET` | `/admin/stations` | List all stations with live/relay status |
+| `GET` | `/admin/stations` | List all stations with live/relay/ingest status |
 | `GET` | `/admin/stations/{username}` | Single station status |
 | `POST` | `/admin/stations/{username}/stream/stop` | Suspend ingest + propagate TerminateStream to relay followers |
 | `POST` | `/admin/stations/{username}/stream/start` | Resume ingest (re-enable after stop, ready for fresh broadcast) |
 | `POST` | `/admin/stations/{username}/relay/start` | Start relay (body: `{"source_url":"..."}`) |
 | `POST` | `/admin/stations/{username}/relay/stop` | Stop relay |
+| `POST` | `/admin/stations/{username}/ingest/start` | Spawn `broadcast.sh` subprocess on the server (body: `{"audio_file":""}`) |
+| `POST` | `/admin/stations/{username}/ingest/stop` | Kill the managed broadcast subprocess |
+| `GET` | `/admin/logs` | SSE stream of server log lines (`text/event-stream`) |
 
 Station status response:
 ```json
-{"username":"morning-vibes","isLive":true,"segmentCount":8,"listenerCount":3,"isRelaying":false}
+{"username":"morning-vibes","isLive":true,"segmentCount":8,"listenerCount":3,"isRelaying":false,"isIngesting":true}
 ```
 
 Config: add `admin_key` and `territory` to `config.yaml`:
@@ -291,3 +294,100 @@ curl -X POST http://localhost:8080/admin/stations/morning-vibes/stream/start \
 # Then run broadcast.sh again to start a new stream:
 ./bin/broadcast.sh morning-vibes http://localhost:8080 60
 ```
+
+---
+
+## ✅ 6. Admin Web UI
+
+A browser-based admin UI embedded directly in the Go binary, providing a full station management interface without requiring a separate service.
+
+**Done.** A React + Vite + TypeScript SPA is built separately and embedded into the Go binary at `/admin/ui/` via `//go:embed`. Two new packages were added alongside updates to the admin handler and main server entrypoint:
+
+### New packages
+
+- **`internal/adminui/`** — Serves the embedded SPA at `/admin/ui/`
+  - `embed_prod.go` (build tag `!admindev`) — `//go:embed all:dist`, exports `var dist fs.FS`
+  - `embed_dev.go` (build tag `admindev`) — sets `var dist fs.FS = nil`; dev mode proxies to Vite dev server
+  - `handler.go` — `Handler() http.Handler`: in production, strips the `/admin/ui` prefix and serves from the embedded `dist/`, with an SPA fallback (returns `index.html` for directories and missing files to avoid `http.FileServer`'s redirect behavior); in dev mode, reverse-proxies to the URL in `ADMINUI_DEV_PROXY`
+
+- **`internal/broadcaster/manager.go`** — Per-station subprocess manager for `bin/broadcast.sh`
+  - `NewManager()`, `Start(username, serverURL, audioFile string) error`, `Stop(username string)`, `IsRunning(username string) bool`
+  - Spawns `./bin/broadcast.sh` (overridable via `BROADCAST_SCRIPT` env var)
+  - `AUDIO_INPUT` env var overrides FFmpeg audio input (format: `-stream_loop -1 -i /path/to/file.mp3`); empty = test tone
+  - Process group management with SIGINT + SIGKILL fallback on stop
+
+### Modified files
+
+- **`internal/admin/handler.go`** — accepts `*broadcaster.Manager`; implements three new endpoints (`ingest/start`, `ingest/stop`, `GET /admin/logs`); `StationStatus` now includes `"isIngesting": bool`
+- **`cmd/server/main.go`** — creates `bcMgr := broadcaster.NewManager()`, mounts `router.PathPrefix("/admin/ui").Handler(adminui.Handler())` **before** the `/admin` sub-router so SPA assets are served without the auth middleware
+
+### Frontend (ui/)
+
+The SPA lives in `ui/` and is built independently before embedding:
+
+| File | Purpose |
+|---|---|
+| `ui/src/api/client.ts` | Typed `AdminClient` class wrapping all admin API endpoints |
+| `ui/src/context/AuthContext.tsx` | Admin key stored in `localStorage`; injects `Authorization` header |
+| `ui/src/pages/Login.tsx` | Simple key entry form |
+| `ui/src/pages/Dashboard.tsx` | Station list with polling |
+| `ui/src/components/StationCard.tsx` | Per-station card: live/relay/ingest status, start/stop controls |
+| `ui/src/components/HLSPlayer.tsx` | hls.js audio player configured for live streaming |
+| `ui/src/components/LogFeed.tsx` | Connects to `GET /admin/logs` SSE stream and displays log lines |
+| `ui/src/App.tsx` | React Router v6 shell (`/` → Login, `/dashboard` → Dashboard) |
+
+### HLS live playback configuration
+
+`HLSPlayer.tsx` configures hls.js for minimum latency:
+
+```ts
+{
+  liveSyncDurationCount: 1,       // start ~6 s from live edge (1 segment)
+  liveMaxLatencyDurationCount: 3, // re-sync if more than 3 segments behind
+  liveBackBufferLength: 0,        // no rewind buffer
+}
+```
+
+### CORS headers on HLS endpoints
+
+`ManifestHandler` and `SegmentHandler` now set `Access-Control-Allow-Origin: *`. This is required because hls.js resolves segment URLs from the absolute `cfg.BaseURL()`, which is a different origin from the Vite dev server (or any other cross-origin listener).
+
+### Dev workflow
+
+```bash
+# Terminal 1 — Go server with Vite proxy enabled
+go run -tags admindev ./cmd/server
+
+# Terminal 2 — Vite dev server on :5173
+cd ui && npm run dev
+```
+
+Vite proxy rules in `ui/vite.config.ts`:
+- `/stations` → `http://localhost:8080`
+- `^/admin(?!/ui)` → `http://localhost:8080` (regex skips the SPA path itself to avoid a proxy loop)
+
+The UI is then available at `http://localhost:5173/` with hot-module reload.
+
+### Production workflow
+
+```bash
+# Step 1 — build the SPA (outputs to ui/dist/, embedded by embed_prod.go)
+cd ui && npm run build
+
+# Step 2 — compile Go binary with embedded assets
+go build ./...
+```
+
+The resulting binary serves the SPA at `/admin/ui/` with no external dependencies.
+
+### VS Code integration
+
+- `.vscode/launch.json` — **"Run Server (dev)"** launch config uses `-tags admindev`; **"Run Server (prod)"** builds and runs without the tag
+- `.vscode/tasks.json` — **"Build UI"** shell task runs `npm run build` inside `ui/`
+
+### Admin Web UI environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `ADMINUI_DEV_PROXY` | `http://localhost:5173` | Vite dev server URL (used in `admindev` build only) |
+| `BROADCAST_SCRIPT` | `./bin/broadcast.sh` | Path to the broadcast script spawned by `ingest/start` |

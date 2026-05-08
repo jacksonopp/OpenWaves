@@ -43,26 +43,49 @@ func Handler() http.Handler {
 	}
 	fileServer := http.FileServer(http.FS(sub))
 
+	// Read index.html once at startup for the SPA fallback. We serve it
+	// directly (not via fileServer) because http.FileServer redirects any
+	// path ending in "index.html" away, which would cause an infinite loop.
+	indexHTML, err := fs.ReadFile(sub, "index.html")
+	if err != nil {
+		panic("adminui: dist/index.html not found in embedded FS")
+	}
+
+	serveIndex := func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write(indexHTML)
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Strip the /admin/ui prefix.
-		path := strings.TrimPrefix(r.URL.Path, "/admin/ui")
-		if path == "" {
-			path = "/"
+		// Strip the /admin/ui prefix so the file server sees paths relative
+		// to the dist/ root (e.g. "/assets/main.js", not "/admin/ui/assets/…").
+		fsPath := strings.TrimPrefix(r.URL.Path, "/admin/ui")
+		if fsPath == "" {
+			fsPath = "/"
 		}
 
-		// Try to serve the file directly; if it doesn't exist, fall back to index.html.
-		f, err := sub.Open(strings.TrimPrefix(path, "/"))
+		// Directories and missing files both fall back to index.html so that
+		// React Router can handle client-side paths.
+		openPath := strings.TrimPrefix(fsPath, "/")
+		if openPath == "" {
+			openPath = "."
+		}
+		f, err := sub.Open(openPath)
 		if err != nil {
-			// Serve the SPA root so React Router can handle the path.
-			r2 := r.Clone(r.Context())
-			r2.URL.Path = "/admin/ui/index.html"
-			fileServer.ServeHTTP(w, r2)
+			serveIndex(w)
 			return
 		}
+		stat, err := f.Stat()
 		f.Close()
+		if err != nil || stat.IsDir() {
+			serveIndex(w)
+			return
+		}
 
+		// Serve the static asset with the stripped path.
 		r2 := r.Clone(r.Context())
-		r2.URL.Path = "/admin/ui" + path
+		r2.URL.Path = "/" + openPath
 		fileServer.ServeHTTP(w, r2)
 	})
 }
