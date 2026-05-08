@@ -1,6 +1,12 @@
 package hls
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
+
+// liveTimeout is how long after the last segment before a station is considered offline.
+const liveTimeout = 20 * time.Second
 
 // Segment is a single HLS transport-stream chunk with metadata.
 type Segment struct {
@@ -15,6 +21,7 @@ type Store struct {
 	mu          sync.RWMutex
 	maxSegments int
 	segments    map[string][]Segment
+	lastAdded   map[string]time.Time
 }
 
 // NewStore creates a Store that retains at most maxSegments per station.
@@ -22,6 +29,7 @@ func NewStore(maxSegments int) *Store {
 	return &Store{
 		maxSegments: maxSegments,
 		segments:    make(map[string][]Segment),
+		lastAdded:   make(map[string]time.Time),
 	}
 }
 
@@ -35,6 +43,7 @@ func (s *Store) Add(username string, seg Segment) {
 		segs = segs[1:]
 	}
 	s.segments[username] = append(segs, seg)
+	s.lastAdded[username] = time.Now()
 }
 
 // Segments returns a copy of the current segment window for a station (oldest first).
@@ -49,6 +58,14 @@ func (s *Store) Segments(username string) []Segment {
 	out := make([]Segment, len(src))
 	copy(out, src)
 	return out
+}
+
+// IsLive returns true if a segment was received within liveTimeout.
+func (s *Store) IsLive(username string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t, ok := s.lastAdded[username]
+	return ok && time.Since(t) < liveTimeout
 }
 
 // Get returns a single segment by filename for a station.
@@ -70,4 +87,5 @@ func (s *Store) Clear(username string) {
 	defer s.mu.Unlock()
 
 	delete(s.segments, username)
+	delete(s.lastAdded, username)
 }

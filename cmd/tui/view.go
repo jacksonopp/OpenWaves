@@ -109,10 +109,10 @@ func (m model) renderRight(width, height int) string {
 	case viewLoopChoice:
 		return m.renderLoopChoice()
 	default:
-		if m.currentView == viewDetail && len(m.stations) > 0 {
+		if len(m.stations) > 0 {
 			return m.renderDetail(width, height)
 		}
-		return dimStyle.Render("Select a station and press enter")
+		return dimStyle.Render("No stations")
 	}
 }
 
@@ -147,7 +147,7 @@ func (m model) renderDetail(width, height int) string {
 	}
 
 	var broadcastStr string
-	if m.runner.IsRunning() {
+	if m.runner.IsRunning(s.Username) {
 		broadcastStr = liveStyle.Render("running")
 	} else {
 		broadcastStr = offlineStyle.Render("stopped")
@@ -155,14 +155,14 @@ func (m model) renderDetail(width, height int) string {
 
 	var detail strings.Builder
 	detail.WriteString(titleStyle.Render(s.Username) + "\n")
-	detail.WriteString(fmt.Sprintf("Status:    %s\n", liveStr))
+	detail.WriteString(fmt.Sprintf("Stream:    %s\n", liveStr))
 	detail.WriteString(fmt.Sprintf("Segments:  %d\n", s.SegmentCount))
 	detail.WriteString(fmt.Sprintf("Relay:     %s\n", relayStr))
 	detail.WriteString(fmt.Sprintf("Broadcast: %s\n", broadcastStr))
 	detail.WriteString("\n")
 	detail.WriteString(dimStyle.Render("─── broadcast log ───") + "\n")
 
-	logs := m.logs
+	logs := m.runner.Lines(s.Username)
 	if len(logs) > 8 {
 		logs = logs[len(logs)-8:]
 	}
@@ -176,10 +176,8 @@ func (m model) renderDetail(width, height int) string {
 func (m model) renderFooter() string {
 	var hints string
 	switch m.currentView {
-	case viewList:
-		hints = "↑/k up  ↓/j down  enter: detail  q: quit"
-	case viewDetail:
-		hints = "esc: back  b: start broadcast  B: stop broadcast  s: start stream  S: stop stream  r: relay  x: stop relay  q: quit"
+	case viewList, viewDetail:
+		hints = "↑/k up  ↓/j down  b: start broadcast  B: stop broadcast  s: start stream  S: stop stream  r: relay  x: stop relay  q: quit"
 	case viewInput:
 		hints = "enter: confirm  esc: cancel"
 	case viewAudioMenu:

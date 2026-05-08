@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -56,7 +57,7 @@ func stationStatus(username string, store *hls.Store, relayMgr *relay.Manager) S
 	segs := store.Segments(username)
 	return StationStatus{
 		Username:     username,
-		IsLive:       len(segs) > 0,
+		IsLive:       store.IsLive(username),
 		SegmentCount: len(segs),
 		IsRelaying:   relayMgr.IsRelaying(username),
 	}
@@ -69,6 +70,9 @@ func listStationsHandler(cfg *config.Config, store *hls.Store, relayMgr *relay.M
 		for username := range registry {
 			statuses = append(statuses, stationStatus(username, store, relayMgr))
 		}
+		sort.Slice(statuses, func(i, j int) bool {
+			return statuses[i].Username < statuses[j].Username
+		})
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(statuses)
 	}

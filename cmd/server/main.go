@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 
 	"github.com/gorilla/mux"
 	"github.com/jacksonopp/openwaves/internal/actor"
@@ -110,11 +111,14 @@ func publicStationsListHandler(cfg *config.Config, store *hls.Store) http.Handle
 				Username:     username,
 				Name:         sc.Name,
 				Summary:      sc.Summary,
-				IsLive:       len(segs) > 0,
+				IsLive:       store.IsLive(username),
 				SegmentCount: len(segs),
 				HLSURL:       cfg.BaseURL() + "/stations/" + username + "/hls/stream.m3u8",
 			})
 		}
+		sort.Slice(stations, func(i, j int) bool {
+			return stations[i].Username < stations[j].Username
+		})
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(stations)
 	}
@@ -158,7 +162,7 @@ func stationHandler(cfg *config.Config, store *hls.Store, pubKeyPEMs map[string]
 		}
 		s.StationURI = fmt.Sprintf("openwaves://%s@%s", username, cfg.Domain)
 
-		if len(store.Segments(username)) > 0 {
+		if store.IsLive(username) {
 			s.IsLive = true
 			s.BroadcastStatus = actor.LIVE
 		}

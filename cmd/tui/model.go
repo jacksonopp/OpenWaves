@@ -36,7 +36,6 @@ type model struct {
 	currentView     view
 	inputMode       inputMode
 	textInput       textinput.Model
-	logs            []string
 	statusMsg       string
 	err             error
 	width           int
@@ -51,7 +50,6 @@ type model struct {
 // Messages
 
 type tickMsg struct{}
-type logLineMsg string
 type stationsMsg []api.StationStatus
 type errMsg error
 type statusClearMsg struct{}
@@ -60,7 +58,7 @@ type statusMsg string
 // Init
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(fetchStations(m.client), listenLogs(m.runner.LogCh))
+	return tea.Batch(fetchStations(m.client), tickCmd())
 }
 
 // Update
@@ -81,13 +79,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.selected >= len(m.stations) && len(m.stations) > 0 {
 			m.selected = len(m.stations) - 1
 		}
-
-	case logLineMsg:
-		m.logs = append(m.logs, string(msg))
-		if len(m.logs) > 50 {
-			m.logs = m.logs[len(m.logs)-50:]
-		}
-		cmds = append(cmds, listenLogs(m.runner.LogCh))
 
 	case errMsg:
 		m.err = msg
@@ -230,55 +221,46 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			switch msg.String() {
 			case "ctrl+c", "q":
-				m.runner.Stop()
+				m.runner.StopAll()
 				return m, tea.Quit
 
 			case "up", "k":
-				if m.currentView == viewList && m.selected > 0 {
+				if m.selected > 0 {
 					m.selected--
 				}
 
 			case "down", "j":
-				if m.currentView == viewList && m.selected < len(m.stations)-1 {
+				if m.selected < len(m.stations)-1 {
 					m.selected++
 				}
 
-			case "enter":
-				if m.currentView == viewList && len(m.stations) > 0 {
-					m.currentView = viewDetail
-				}
-
-			case "esc":
-				if m.currentView == viewDetail {
-					m.currentView = viewList
-				}
-
 			case "b":
-				if m.currentView == viewDetail && len(m.stations) > 0 {
+				if len(m.stations) > 0 {
 					m.currentView = viewAudioMenu
 					m.audioMenuCursor = 0
 				}
 
 			case "B":
-				if m.currentView == viewDetail {
-					m.runner.Stop()
+				if len(m.stations) > 0 {
+					username := m.stations[m.selected].Username
+					m.runner.Stop(username)
 					cmds = append(cmds, func() tea.Msg { return statusMsg("broadcast stopped") })
 				}
 
 			case "s":
-				if m.currentView == viewDetail && len(m.stations) > 0 {
+				if len(m.stations) > 0 {
 					username := m.stations[m.selected].Username
 					cmds = append(cmds, doStartStream(m.client, username))
 				}
 
 			case "S":
-				if m.currentView == viewDetail && len(m.stations) > 0 {
+				if len(m.stations) > 0 {
 					username := m.stations[m.selected].Username
 					cmds = append(cmds, doStopStream(m.client, username))
 				}
 
 			case "r":
-				if m.currentView == viewDetail && len(m.stations) > 0 {
+				if len(m.stations) > 0 {
 					m.currentView = viewInput
 					m.inputMode = inputRelaySource
 					m.textInput.Placeholder = "e.g. http://localhost:8080/stations/morning-vibes"
@@ -286,7 +268,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			case "x":
-				if m.currentView == viewDetail && len(m.stations) > 0 {
+				if len(m.stations) > 0 {
 					username := m.stations[m.selected].Username
 					cmds = append(cmds, doStopRelay(m.client, username))
 				}
@@ -313,16 +295,6 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 		return tickMsg{}
 	})
-}
-
-func listenLogs(logCh chan string) tea.Cmd {
-	return func() tea.Msg {
-		line, ok := <-logCh
-		if !ok {
-			return logLineMsg("[broadcast log channel closed]")
-		}
-		return logLineMsg(line)
-	}
 }
 
 func doStopStream(client *api.Client, username string) tea.Cmd {

@@ -18,7 +18,6 @@ type listenerModel struct {
 	pl          *player.Player
 	stations    []api.PublicStation
 	selected    int
-	showDetail  bool
 	playingURL  string
 	statusMsg   string
 	err         error
@@ -81,27 +80,17 @@ func (m listenerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "up", "k":
-			if !m.showDetail && m.selected > 0 {
+			if m.selected > 0 {
 				m.selected--
 			}
 
 		case "down", "j":
-			if !m.showDetail && m.selected < len(m.stations)-1 {
+			if m.selected < len(m.stations)-1 {
 				m.selected++
 			}
 
-		case "enter":
-			if !m.showDetail && len(m.stations) > 0 {
-				m.showDetail = true
-			}
-
-		case "esc":
-			if m.showDetail {
-				m.showDetail = false
-			}
-
 		case "p":
-			if m.showDetail && len(m.stations) > 0 {
+			if len(m.stations) > 0 {
 				s := m.stations[m.selected]
 				if !s.IsLive {
 					cmds = append(cmds, func() tea.Msg { return statusMsg("station is offline") })
@@ -195,8 +184,8 @@ func (m listenerModel) renderListenerList(width, height int) string {
 }
 
 func (m listenerModel) renderListenerRight(width, height int) string {
-	if !m.showDetail || len(m.stations) == 0 {
-		return dimStyle.Render("Select a station and press enter")
+	if len(m.stations) == 0 {
+		return dimStyle.Render("No stations")
 	}
 	s := m.stations[m.selected]
 
@@ -229,12 +218,7 @@ func (m listenerModel) renderListenerRight(width, height int) string {
 }
 
 func (m listenerModel) renderListenerFooter() string {
-	var hints string
-	if m.showDetail {
-		hints = "esc: back  p: play  P: stop  q: quit"
-	} else {
-		hints = "↑/k up  ↓/j down  enter: detail  q: quit"
-	}
+	hints := "↑/k up  ↓/j down  p: play  P: stop  q: quit"
 	return dimStyle.Render(hints)
 }
 
