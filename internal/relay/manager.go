@@ -2,8 +2,6 @@ package relay
 
 import (
 	"crypto/rsa"
-	"net"
-	"net/http"
 	"sync"
 
 	"github.com/jacksonopp/openwaves/internal/hls"
@@ -23,23 +21,6 @@ func NewManager(store *hls.Store, privKeys map[string]*rsa.PrivateKey) *Manager 
 		sessions: make(map[string]*Session),
 		store:    store,
 		privKeys: privKeys,
-	}
-}
-
-// ListenerMiddleware wraps an HLS manifest handler to track active listeners for a station.
-// Each unique client IP that fetches the manifest is counted as a listener.
-func (m *Manager) ListenerMiddleware(username string, next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ip, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			ip = r.RemoteAddr
-		}
-		m.mu.Lock()
-		if s, ok := m.sessions[username]; ok {
-			s.noteListener(ip)
-		}
-		m.mu.Unlock()
-		next(w, r)
 	}
 }
 
@@ -80,4 +61,16 @@ func (m *Manager) IsRelaying(username string) bool {
 
 	_, ok := m.sessions[username]
 	return ok
+}
+
+// SourceURL returns the source URL for the active relay session of username,
+// or empty string if no session exists.
+func (m *Manager) SourceURL(username string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if s, ok := m.sessions[username]; ok {
+		return s.sourceURL
+	}
+	return ""
 }

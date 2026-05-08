@@ -2,6 +2,8 @@ package admin
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"sort"
@@ -16,10 +18,11 @@ import (
 
 // StationStatus is the JSON response type for admin station info.
 type StationStatus struct {
-	Username     string `json:"username"`
-	IsLive       bool   `json:"isLive"`
-	SegmentCount int    `json:"segmentCount"`
-	IsRelaying   bool   `json:"isRelaying"`
+	Username      string `json:"username"`
+	IsLive        bool   `json:"isLive"`
+	SegmentCount  int    `json:"segmentCount"`
+	ListenerCount int    `json:"listenerCount"`
+	IsRelaying    bool   `json:"isRelaying"`
 }
 
 // Handler returns an http.Handler (gorilla/mux sub-router) for all /admin/* routes.
@@ -56,10 +59,11 @@ func authMiddleware(adminKey string) mux.MiddlewareFunc {
 func stationStatus(username string, store *hls.Store, relayMgr *relay.Manager) StationStatus {
 	segs := store.Segments(username)
 	return StationStatus{
-		Username:     username,
-		IsLive:       store.IsLive(username),
-		SegmentCount: len(segs),
-		IsRelaying:   relayMgr.IsRelaying(username),
+		Username:      username,
+		IsLive:        store.IsLive(username),
+		SegmentCount:  len(segs),
+		ListenerCount: store.ListenerCount(username),
+		IsRelaying:    relayMgr.IsRelaying(username),
 	}
 }
 
@@ -114,6 +118,7 @@ func startStreamHandler(cfg *config.Config, store *hls.Store) http.HandlerFunc {
 			http.Error(w, "station not found", http.StatusNotFound)
 			return
 		}
+		store.Resume(username)
 		store.Clear(username)
 		log.Printf("admin: cleared store for station %s (ready for ingest)", username)
 		w.WriteHeader(http.StatusOK)
@@ -144,6 +149,13 @@ func startRelayHandler(cfg *config.Config, relayMgr *relay.Manager) http.Handler
 		// Accept either a station base URL or an HLS manifest URL — normalize to base.
 		sourceURL := strings.TrimSuffix(strings.TrimSpace(body.SourceURL), "/hls/stream.m3u8")
 
+		// Territory check: fetch source actor and verify licenseTerritory.
+		if err := checkTerritory(cfg.Territory, sourceURL); err != nil {
+			log.Printf("admin: relay denied for %s: %v", username, err)
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+
 		selfURL := cfg.BaseURL() + "/stations/" + username
 		if err := relayMgr.StartRelay(username, sourceURL, selfURL); err != nil {
 			log.Printf("admin: failed to start relay for %s: %v", username, err)
@@ -153,6 +165,46 @@ func startRelayHandler(cfg *config.Config, relayMgr *relay.Manager) http.Handler
 		log.Printf("admin: started relay for station %s from %s", username, sourceURL)
 		w.WriteHeader(http.StatusOK)
 	}
+}
+
+// checkTerritory fetches the source station actor and verifies the relay's
+// territory is in the source's licenseTerritory list. Returns an error if
+// the territory is not allowed.
+func checkTerritory(relayTerritory, sourceURL string) error {
+	req, err := http.NewRequest(http.MethodGet, sourceURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to build request to source: %w", err)
+	}
+	req.Header.Set("Accept", "application/activity+json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to fetch source actor: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read source actor: %w", err)
+	}
+
+	var actor struct {
+		LicenseTerritory []string `json:"licenseTerritory"`
+	}
+	if err := json.Unmarshal(body, &actor); err != nil {
+		return fmt.Errorf("failed to parse source actor: %w", err)
+	}
+
+	// No restriction if empty or worldwide.
+	if len(actor.LicenseTerritory) == 0 {
+		return nil
+	}
+	for _, t := range actor.LicenseTerritory {
+		if t == "*" || strings.EqualFold(t, relayTerritory) {
+			return nil
+		}
+	}
+	return fmt.Errorf("stream not licensed for relay in this territory (%s)", relayTerritory)
 }
 
 func stopRelayHandler(cfg *config.Config, relayMgr *relay.Manager) http.HandlerFunc {

@@ -36,7 +36,7 @@ Defederation Signals: Admins can "mute" or "block" specific federated streams at
 
 Source Attribution: Every audio chunk is cryptographically signed by the originating server to prevent "stream spoofing" or impersonation.
 
-Broadcast Termination Signal: The source server can broadcast a signed `TerminateStream` ActivityPub activity to its followers collection at any time. Relay servers that receive this activity MUST immediately cease serving that stream, purge any buffered segments, and propagate the signal to their own downstream relay followers — enabling a cascading shutdown across the relay graph. A short grace window of 5 seconds is allowed to complete any in-flight segment requests before purging.
+Broadcast Termination Signal: The source server admin can send a `TerminateStream` signal at any time via the admin API (`POST /admin/stations/{username}/stream/stop`). This clears the source's segment store and propagates a `TerminateStream` ActivityPub activity to all relay followers, triggering a cascading shutdown across the relay graph. **TerminateStream is an admin-only action on the source server** — relay servers and external actors cannot trigger it via the ActivityPub inbox. A short grace window of 5 seconds is allowed to complete any in-flight segment requests before purging.
 
 ## 6. Passive Device Compliance
 OpenWaves relay servers are designed to function as passive transmission devices — analogous to how the FCC classifies cable retransmission equipment — rather than as active content retransmitters.
@@ -52,4 +52,4 @@ Each relay server is required to send a cryptographically signed heartbeat back 
 
 The heartbeat payload includes: `relayId` (the relay's ActivityPub actor URL), `streamId` (the stream being relayed), `listenerCount` (aggregate number of active listeners on that relay), `timestamp`, and a `signature` generated using the relay's ActivityPub HTTP Signature private key.
 
-Heartbeats report aggregate listener counts only and never include individual listener identities or connection metadata. The source server uses these heartbeats to build a real-time aggregate listener count across the relay graph. A relay that stops sending heartbeats for more than 60 seconds is considered offline by the source.
+Heartbeats report aggregate listener counts only and never include individual listener identities or connection metadata. Listener counts include **both direct listeners** (clients fetching the manifest directly from a server) **and relay-reported listeners** (counts from downstream relays via heartbeat). The source server uses these heartbeats to build a real-time aggregate listener count across the relay graph. A relay that stops sending heartbeats for more than 60 seconds is considered offline by the source.

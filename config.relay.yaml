@@ -3,6 +3,7 @@ scheme: "http"
 registration: "open"
 keys_dir: keys-relay
 admin_key: "relay-secret"  # set a secret to enable the /admin API and TUI control
+territory: "US"             # this relay only re-hosts streams licensed for the US
 
 stations:
   - username: "relay-one"

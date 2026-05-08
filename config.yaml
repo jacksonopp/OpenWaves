@@ -3,6 +3,7 @@ scheme: "http"
 registration: "open"
 keys_dir: keys
 admin_key: "secret"  # set a secret to enable the /admin API and TUI control
+territory: "*"        # this server broadcasts worldwide
 
 stations:
   - username: "morning-vibes"

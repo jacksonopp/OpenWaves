@@ -11,7 +11,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/jacksonopp/openwaves/internal/activity"
 	"github.com/jacksonopp/openwaves/internal/config"
-	"github.com/jacksonopp/openwaves/internal/hls"
 )
 
 // remoteActor holds the fields we need from a fetched ActivityPub actor.
@@ -20,9 +19,10 @@ type remoteActor struct {
 }
 
 // Handler returns an http.HandlerFunc for POST /stations/{username}/inbox.
-// onTerminate is an optional callback invoked when a TerminateStream is received;
-// relay servers pass relay.Manager.StopRelay; source servers pass nil.
-func Handler(cfg *config.Config, hlsStore *hls.Store, followerStore *FollowerStore, onTerminate func(string)) http.HandlerFunc {
+// It accepts Follow and ProofOfListen activities from external servers.
+// If onTerminate is non-nil (relay servers), TerminateStream activities invoke the callback.
+// If onTerminate is nil (source servers), TerminateStream is silently accepted with 202.
+func Handler(cfg *config.Config, followerStore *FollowerStore, onTerminate func(actorURL, username string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		username := vars["username"]
@@ -51,6 +51,17 @@ func Handler(cfg *config.Config, hlsStore *hls.Store, followerStore *FollowerSto
 		switch act.Type {
 		case "Follow":
 			handleFollow(w, act, body, stationCfg, stationURL, followerStore)
+		case "TerminateStream":
+			var ts activity.TerminateStream
+			if err := json.Unmarshal(body, &ts); err != nil {
+				http.Error(w, "invalid TerminateStream", http.StatusBadRequest)
+				return
+			}
+			if onTerminate != nil {
+				onTerminate(ts.Actor, username)
+			}
+			w.WriteHeader(http.StatusAccepted)
+			return
 		case "ProofOfListen":
 			var pol activity.ProofOfListen
 			if err := json.Unmarshal(body, &pol); err != nil {
@@ -59,16 +70,9 @@ func Handler(cfg *config.Config, hlsStore *hls.Store, followerStore *FollowerSto
 			}
 			log.Printf("inbox: ProofOfListen from %s — listeners=%d timestamp=%s", pol.Actor, pol.ListenerCount, pol.Timestamp)
 			w.WriteHeader(http.StatusOK)
-		case "TerminateStream":
-			var ts activity.TerminateStream
-			if err := json.Unmarshal(body, &ts); err != nil {
-				http.Error(w, "invalid JSON", http.StatusBadRequest)
-				return
-			}
-			log.Printf("inbox: TerminateStream received from %s — clearing segments for %s", ts.Actor, username)
-			TerminateStation(username, hlsStore, followerStore, onTerminate)
-			w.WriteHeader(http.StatusOK)
 		default:
+			// Unknown or disallowed activity types (including TerminateStream from external
+			// servers) are silently accepted to avoid leaking information.
 			w.WriteHeader(http.StatusAccepted)
 		}
 	}

@@ -12,13 +12,12 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/jacksonopp/openwaves/internal/activity"
 	"github.com/jacksonopp/openwaves/internal/config"
-	"github.com/jacksonopp/openwaves/internal/hls"
 )
 
 // makeRouter wraps the Handler in a gorilla/mux router so {username} is populated.
-func makeRouter(cfg *config.Config, hlsStore *hls.Store, fs *FollowerStore) http.Handler {
+func makeRouter(cfg *config.Config, fs *FollowerStore) http.Handler {
 	r := mux.NewRouter()
-	r.Handle("/stations/{username}/inbox", Handler(cfg, hlsStore, fs, nil)).Methods(http.MethodPost)
+	r.Handle("/stations/{username}/inbox", Handler(cfg, fs, nil)).Methods(http.MethodPost)
 	return r
 }
 
@@ -69,8 +68,7 @@ func TestHandler_Follow_Open(t *testing.T) {
 
 	cfg := testConfig("open")
 	fs := NewFollowerStore()
-	hlsStore := hls.NewStore(10)
-	router := makeRouter(cfg, hlsStore, fs)
+	router := makeRouter(cfg, fs)
 
 	followBody, _ := json.Marshal(activity.Activity{
 		Type:  "Follow",
@@ -126,8 +124,7 @@ func TestHandler_Follow_Closed(t *testing.T) {
 
 	cfg := testConfig("closed")
 	fs := NewFollowerStore()
-	hlsStore := hls.NewStore(10)
-	router := makeRouter(cfg, hlsStore, fs)
+	router := makeRouter(cfg, fs)
 
 	followBody, _ := json.Marshal(activity.Activity{
 		Type:  "Follow",
@@ -153,15 +150,13 @@ func TestHandler_Follow_Closed(t *testing.T) {
 	}
 }
 
+// TestHandler_TerminateStream verifies that TerminateStream sent to the inbox
+// is silently ignored (returns 202) — it is an admin-only action, not an
+// activity external servers can trigger.
 func TestHandler_TerminateStream(t *testing.T) {
 	cfg := testConfig("open")
 	fs := NewFollowerStore()
-	hlsStore := hls.NewStore(10)
-
-	// Pre-populate a segment.
-	hlsStore.Add("teststation", hls.Segment{Filename: "seg0.ts", SeqNum: 0})
-
-	router := makeRouter(cfg, hlsStore, fs)
+	router := makeRouter(cfg, fs)
 
 	body, _ := json.Marshal(activity.TerminateStream{
 		Type:   "TerminateStream",
@@ -170,21 +165,15 @@ func TestHandler_TerminateStream(t *testing.T) {
 	})
 
 	rr := postInbox(router, string(body))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-
-	segs := hlsStore.Segments("teststation")
-	if len(segs) != 0 {
-		t.Errorf("expected 0 segments after TerminateStream, got %d", len(segs))
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 (TerminateStream ignored via inbox), got %d", rr.Code)
 	}
 }
 
 func TestHandler_ProofOfListen(t *testing.T) {
 	cfg := testConfig("open")
 	fs := NewFollowerStore()
-	hlsStore := hls.NewStore(10)
-	router := makeRouter(cfg, hlsStore, fs)
+	router := makeRouter(cfg, fs)
 
 	body, _ := json.Marshal(activity.ProofOfListen{
 		Type:          "ProofOfListen",
@@ -200,51 +189,10 @@ func TestHandler_ProofOfListen(t *testing.T) {
 	}
 }
 
-func TestHandler_TerminateStream_CallsOnTerminate(t *testing.T) {
-	cfg := testConfig("open")
-	fs := NewFollowerStore()
-	hlsStore := hls.NewStore(10)
-	hlsStore.Add("teststation", hls.Segment{Filename: "seg0.ts", SeqNum: 0})
-
-	var terminated string
-	r := mux.NewRouter()
-	r.Handle("/stations/{username}/inbox", Handler(cfg, hlsStore, fs, func(u string) {
-		terminated = u
-	})).Methods(http.MethodPost)
-
-	body, _ := json.Marshal(activity.TerminateStream{
-		Type:   "TerminateStream",
-		Actor:  "http://source.example.com/stations/src",
-		Object: "http://example.com/stations/teststation",
-	})
-
-	req := httptest.NewRequest(http.MethodPost, "/stations/teststation/inbox", strings.NewReader(string(body)))
-	req.Header.Set("Content-Type", "application/activity+json")
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	if terminated != "teststation" {
-		t.Errorf("expected onTerminate called with 'teststation', got %q", terminated)
-	}
-	if len(hlsStore.Segments("teststation")) != 0 {
-		t.Error("expected store cleared after TerminateStream")
-	}
-}
-
 func TestHandler_TerminateStream_PropagatestoFollowers(t *testing.T) {
-	var propagated bool
-	var mu sync.Mutex
-
-	// Fake follower inbox server that records the TerminateStream.
+	// TerminateStream sent to inbox should be ignored (202), not propagated.
+	// Propagation only happens when triggered by the admin API.
 	followerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			mu.Lock()
-			propagated = true
-			mu.Unlock()
-		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer followerSrv.Close()
@@ -252,8 +200,7 @@ func TestHandler_TerminateStream_PropagatestoFollowers(t *testing.T) {
 	cfg := testConfig("open")
 	fs := NewFollowerStore()
 	fs.Add("teststation", Follower{ActorURL: followerSrv.URL, InboxURL: followerSrv.URL + "/inbox"})
-	hlsStore := hls.NewStore(10)
-	router := makeRouter(cfg, hlsStore, fs)
+	router := makeRouter(cfg, fs)
 
 	body, _ := json.Marshal(activity.TerminateStream{
 		Type:   "TerminateStream",
@@ -262,23 +209,15 @@ func TestHandler_TerminateStream_PropagatestoFollowers(t *testing.T) {
 	})
 
 	rr := postInbox(router, string(body))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-
-	time.Sleep(100 * time.Millisecond)
-	mu.Lock()
-	defer mu.Unlock()
-	if !propagated {
-		t.Error("expected TerminateStream to be propagated to follower inbox")
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 (TerminateStream via inbox ignored), got %d", rr.Code)
 	}
 }
 
 func TestHandler_UnknownType(t *testing.T) {
 	cfg := testConfig("open")
 	fs := NewFollowerStore()
-	hlsStore := hls.NewStore(10)
-	router := makeRouter(cfg, hlsStore, fs)
+	router := makeRouter(cfg, fs)
 
 	body, _ := json.Marshal(activity.Activity{
 		Type:  "Create",
@@ -294,8 +233,7 @@ func TestHandler_UnknownType(t *testing.T) {
 func TestHandler_BadJSON(t *testing.T) {
 	cfg := testConfig("open")
 	fs := NewFollowerStore()
-	hlsStore := hls.NewStore(10)
-	router := makeRouter(cfg, hlsStore, fs)
+	router := makeRouter(cfg, fs)
 
 	rr := postInbox(router, `{not valid json`)
 	if rr.Code != http.StatusBadRequest {

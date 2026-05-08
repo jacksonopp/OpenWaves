@@ -1,6 +1,7 @@
 package hls
 
 import (
+	"net"
 	"net/http"
 	"strings"
 
@@ -25,6 +26,13 @@ func ManifestHandler(cfg *config.Config, store *Store, targetDuration int) http.
 			http.Error(w, "stream not yet available", http.StatusServiceUnavailable)
 			return
 		}
+
+		// Track this client as an active listener.
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			ip = r.RemoteAddr
+		}
+		store.TrackListener(username, ip)
 
 		baseURL := cfg.BaseURL() + "/stations/" + username + "/hls"
 		playlist := Manifest(store, username, baseURL, targetDuration)

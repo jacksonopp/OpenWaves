@@ -158,10 +158,18 @@ func TestStartStream(t *testing.T) {
 
 // 8. POST /admin/stations/{username}/relay/start valid body → 200
 func TestStartRelay(t *testing.T) {
+	// Mock source server that returns an actor with licenseTerritory: ["*"]
+	sourceSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"licenseTerritory": []string{"*"},
+		})
+	}))
+	defer sourceSrv.Close()
+
 	cfg, store, followerStore, relayMgr := testSetup()
 	h := Handler(cfg, store, followerStore, relayMgr)
 
-	body, _ := json.Marshal(map[string]string{"source_url": "http://source.example.com/stations/src"})
+	body, _ := json.Marshal(map[string]string{"source_url": sourceSrv.URL})
 	rr := doRequest(h, http.MethodPost, "/admin/stations/alice/relay/start", body, "test-key")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (body: %s)", rr.Code, rr.Body.String())

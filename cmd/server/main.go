@@ -65,7 +65,7 @@ func main() {
 
 	router.HandleFunc("/stations/{username}/hls/{segment:[^/]+\\.ts}.sig", hls.SigHandler(cfg, store)).Methods(http.MethodGet)
 
-	router.HandleFunc("/stations/{username}/inbox", inbox.Handler(cfg, store, followerStore, nil)).Methods(http.MethodPost)
+	router.HandleFunc("/stations/{username}/inbox", inbox.Handler(cfg, followerStore, nil)).Methods(http.MethodPost)
 
 	router.PathPrefix("/admin").Handler(admin.Handler(cfg, store, followerStore, relayMgr))
 
@@ -95,12 +95,13 @@ func loadKeys(cfg *config.Config) (map[string]*rsa.PrivateKey, map[string]string
 
 func publicStationsListHandler(cfg *config.Config, store *hls.Store) http.HandlerFunc {
 	type publicStation struct {
-		Username     string `json:"username"`
-		Name         string `json:"name"`
-		Summary      string `json:"summary"`
-		IsLive       bool   `json:"isLive"`
-		SegmentCount int    `json:"segmentCount"`
-		HLSURL       string `json:"hlsUrl"`
+		Username      string `json:"username"`
+		Name          string `json:"name"`
+		Summary       string `json:"summary"`
+		IsLive        bool   `json:"isLive"`
+		SegmentCount  int    `json:"segmentCount"`
+		ListenerCount int    `json:"listenerCount"`
+		HLSURL        string `json:"hlsUrl"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		registry := cfg.Registry()
@@ -108,12 +109,13 @@ func publicStationsListHandler(cfg *config.Config, store *hls.Store) http.Handle
 		for username, sc := range registry {
 			segs := store.Segments(username)
 			stations = append(stations, publicStation{
-				Username:     username,
-				Name:         sc.Name,
-				Summary:      sc.Summary,
-				IsLive:       store.IsLive(username),
-				SegmentCount: len(segs),
-				HLSURL:       cfg.BaseURL() + "/stations/" + username + "/hls/stream.m3u8",
+				Username:      username,
+				Name:          sc.Name,
+				Summary:       sc.Summary,
+				IsLive:        store.IsLive(username),
+				SegmentCount:  len(segs),
+				ListenerCount: store.ListenerCount(username),
+				HLSURL:        cfg.BaseURL() + "/stations/" + username + "/hls/stream.m3u8",
 			})
 		}
 		sort.Slice(stations, func(i, j int) bool {

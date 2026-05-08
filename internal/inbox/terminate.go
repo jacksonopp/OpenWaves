@@ -16,7 +16,7 @@ func TerminateStation(username string, hlsStore *hls.Store, followerStore *Follo
 		Actor:  username,
 		Object: username,
 	}
-	hlsStore.Clear(username)
+	hlsStore.Suspend(username)
 	followers := followerStore.List(username)
 	for _, f := range followers {
 		sendActivity(f.InboxURL, ts)

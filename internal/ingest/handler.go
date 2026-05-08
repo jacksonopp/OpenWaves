@@ -41,6 +41,11 @@ return
 }
 }
 
+if store.IsSuspended(username) {
+http.Error(w, "stream terminated; call stream/start to re-enable ingest", http.StatusServiceUnavailable)
+return
+}
+
 if !strings.HasSuffix(filename, ".ts") {
 http.Error(w, "filename must end in .ts", http.StatusBadRequest)
 return

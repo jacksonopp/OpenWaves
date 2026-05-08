@@ -31,6 +31,7 @@ type Config struct {
 	KeysDir      string             `yaml:"keys_dir"`     // default "keys"
 	Stations     []StationConfig    `yaml:"stations"`
 	AdminKey     string             `yaml:"admin_key"` // if set, all /admin requests require Authorization: Bearer <AdminKey>
+	Territory    string             `yaml:"territory"` // ISO 3166-1 alpha-2 code for this server's territory, e.g. "US" or "*"
 }
 
 func LoadConfig(path string) (*Config, error) {

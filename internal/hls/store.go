@@ -22,6 +22,8 @@ type Store struct {
 	maxSegments int
 	segments    map[string][]Segment
 	lastAdded   map[string]time.Time
+	listeners   map[string]map[string]time.Time // station → IP → last manifest fetch
+	suspended   map[string]bool
 }
 
 // NewStore creates a Store that retains at most maxSegments per station.
@@ -30,6 +32,8 @@ func NewStore(maxSegments int) *Store {
 		maxSegments: maxSegments,
 		segments:    make(map[string][]Segment),
 		lastAdded:   make(map[string]time.Time),
+		listeners:   make(map[string]map[string]time.Time),
+		suspended:   make(map[string]bool),
 	}
 }
 
@@ -88,4 +92,65 @@ func (s *Store) Clear(username string) {
 
 	delete(s.segments, username)
 	delete(s.lastAdded, username)
+}
+
+// Suspend blocks new ingest for a station and clears its segments.
+// Used by the admin stop path. Call Resume to re-enable ingest.
+func (s *Store) Suspend(username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.suspended[username] = true
+	delete(s.segments, username)
+	delete(s.lastAdded, username)
+}
+
+// IsSuspended returns true if ingest is suspended for the station.
+func (s *Store) IsSuspended(username string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.suspended[username]
+}
+
+// Resume re-enables ingest for a station that was previously suspended.
+func (s *Store) Resume(username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.suspended, username)
+}
+
+// listenerWindow is the period within which a manifest fetch is considered an active listener.
+const listenerWindow = 35 * time.Second
+
+// TrackListener records a manifest fetch from the given IP for a station.
+func (s *Store) TrackListener(username, ip string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.listeners[username] == nil {
+		s.listeners[username] = make(map[string]time.Time)
+	}
+	s.listeners[username][ip] = time.Now()
+}
+
+// ListenerCount returns the number of unique IPs that fetched the manifest
+// for a station within the last listenerWindow, pruning stale entries.
+func (s *Store) ListenerCount(username string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ips := s.listeners[username]
+	if ips == nil {
+		return 0
+	}
+	cutoff := time.Now().Add(-listenerWindow)
+	count := 0
+	for ip, t := range ips {
+		if t.After(cutoff) {
+			count++
+		} else {
+			delete(ips, ip)
+		}
+	}
+	return count
 }

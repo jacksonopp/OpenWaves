@@ -3,13 +3,9 @@ package relay
 import (
 	"context"
 	"crypto/rsa"
-	"sync"
-	"time"
 
 	"github.com/jacksonopp/openwaves/internal/hls"
 )
-
-const listenerWindow = 35 * time.Second
 
 // Session is a single active relay — poller + heartbeat goroutines.
 type Session struct {
@@ -20,9 +16,6 @@ type Session struct {
 	privKey   *rsa.PrivateKey
 	cancel    context.CancelFunc
 	done      chan struct{}
-
-	listenerMu sync.Mutex
-	listeners  map[string]time.Time // IP → last manifest fetch time
 }
 
 func newSession(username, sourceURL, selfURL string, store *hls.Store, privKey *rsa.PrivateKey) *Session {
@@ -33,32 +26,13 @@ func newSession(username, sourceURL, selfURL string, store *hls.Store, privKey *
 		store:     store,
 		privKey:   privKey,
 		done:      make(chan struct{}),
-		listeners: make(map[string]time.Time),
 	}
 }
 
-// noteListener records a manifest fetch from the given IP address.
-func (s *Session) noteListener(ip string) {
-	s.listenerMu.Lock()
-	defer s.listenerMu.Unlock()
-	s.listeners[ip] = time.Now()
-}
-
-// listenerCount returns the number of unique IPs that fetched the manifest
-// within the last listenerWindow.
+// listenerCount returns the number of active listeners for this relay station,
+// as tracked by the HLS store (manifest fetches within the last 35s).
 func (s *Session) listenerCount() int {
-	s.listenerMu.Lock()
-	defer s.listenerMu.Unlock()
-	cutoff := time.Now().Add(-listenerWindow)
-	count := 0
-	for ip, t := range s.listeners {
-		if t.After(cutoff) {
-			count++
-		} else {
-			delete(s.listeners, ip) // prune stale entries
-		}
-	}
-	return count
+	return s.store.ListenerCount(s.username)
 }
 
 // start launches the poller and heartbeat goroutines.

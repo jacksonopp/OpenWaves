@@ -73,11 +73,18 @@ func main() {
 	// Station actor — so the source can fetch our public key for verification
 	router.HandleFunc("/stations/{username}", stationActorHandler(cfg, store, pubKeyPEMs)).Methods(http.MethodGet)
 
-	// Inbox — receives TerminateStream from source, ProofOfListen ACKs, etc.
-	router.HandleFunc("/stations/{username}/inbox", inbox.Handler(cfg, store, followerStore, relayMgr.StopRelay)).Methods(http.MethodPost)
+	// Inbox — receives ProofOfListen ACKs, Follow, TerminateStream, etc.
+	// TerminateStream from the source stops the local relay session.
+	onTerminate := func(actorURL, un string) {
+		if relayMgr.SourceURL(un) == actorURL {
+			log.Printf("relay: received TerminateStream from source for %s, stopping relay", un)
+			relayMgr.StopRelay(un)
+		}
+	}
+	router.HandleFunc("/stations/{username}/inbox", inbox.Handler(cfg, followerStore, onTerminate)).Methods(http.MethodPost)
 
 	// HLS — re-serve downloaded+verified segments to local listeners
-	router.HandleFunc("/stations/{username}/hls/stream.m3u8", relayMgr.ListenerMiddleware(username, hls.ManifestHandler(cfg, store, 6))).Methods(http.MethodGet)
+	router.HandleFunc("/stations/{username}/hls/stream.m3u8", hls.ManifestHandler(cfg, store, 6)).Methods(http.MethodGet)
 	router.HandleFunc("/stations/{username}/hls/{segment:[^/]+\\.ts}", hls.SegmentHandler(cfg, store)).Methods(http.MethodGet)
 	router.HandleFunc("/stations/{username}/hls/{segment:[^/]+\\.ts}.sig", hls.SigHandler(cfg, store)).Methods(http.MethodGet)
 

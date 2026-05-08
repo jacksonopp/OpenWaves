@@ -82,41 +82,63 @@ This is the most unique feature. Build the code that allows Server B to subscrib
 
 - License territory check before accepting a stream
 - Proof-of-listen heartbeat (signed, every 30s) back to the source
-- Broadcast termination signal handling (`TerminateStream` ActivityPub activity) with cascading shutdown
+- Broadcast termination signal handling (admin-only via admin API, cascading shutdown to relays)
 
 **Done.** The relay system is implemented across three new packages and a standalone binary:
 
 - **`internal/activity/`** — ActivityPub activity structs: `Activity`, `Accept`, `Reject`, `ProofOfListen` (with `SignableString()` for canonical signing), `TerminateStream`.
 - **`internal/inbox/`** — `POST /stations/{username}/inbox` handler. Dispatches on activity type:
   - `Follow` — fetches the remote actor, checks `relay_policy` (`closed` → send Reject; `open`/`allowlist` → store follower, send Accept)
-  - `TerminateStream` — clears the local segment store, calls `onTerminate` callback (relay uses this to stop its poller), and **propagates the signal to all followers** for cascading shutdown
   - `ProofOfListen` — logs aggregate listener count and timestamp
-  - Unknown types → 202 Accepted
+  - `TerminateStream` and unknown types → 202 Accepted (ignored — TerminateStream is admin-only, not an inbox activity)
 - **`internal/relay/`** — Active relay session manager:
   - `Manager` — mutex-guarded session map; `StartRelay`, `StopRelay`, `IsRelaying`
   - `Session` — wraps a context + done channel; starts two goroutines on `start()`
   - `poller.go` — polls `{sourceURL}/hls/stream.m3u8` every 3s, downloads new segments + `.sig` sidecars, RSA-verifies each segment against the source's public key, stores in local `hls.Store`
-  - `heartbeat.go` — sends a signed `ProofOfListen` POST to `{sourceURL}/inbox` every 30s with the real-time listener count
-  - Listener tracking: each manifest poll from a unique client IP is counted; heartbeats report the number of unique IPs active in the last 35 seconds
+  - `heartbeat.go` — sends a signed `ProofOfListen` POST to `{sourceURL}/inbox` every 30s with the real-time listener count (sourced from `hls.Store.ListenerCount`)
+  - Listener tracking: every manifest fetch (`GET stream.m3u8`) is tracked by client IP in `hls.Store`. Both direct listeners and relay listeners are counted. Heartbeats report the number of unique IPs active in the last 35 seconds.
 - **`cmd/relay/main.go`** — standalone relay server binary configured entirely via environment variables (no `config.yaml` required)
 
 New routes (on both source and relay servers):
 ```
-POST /stations/{username}/inbox   — ActivityPub inbox (Follow, TerminateStream, ProofOfListen)
+POST /stations/{username}/inbox   — ActivityPub inbox (Follow, ProofOfListen)
 ```
 
 Relay server routes:
 ```
 GET /stations/{username}                      — relay station actor (publicKey for verification)
-POST /stations/{username}/inbox               — inbox with onTerminate → StopRelay
+POST /stations/{username}/inbox               — inbox (Follow, ProofOfListen only)
 GET /stations/{username}/hls/stream.m3u8      — relay serves live manifest to local listeners
 GET /stations/{username}/hls/{segment}        — relay serves verified segment bytes
 GET /stations/{username}/hls/{segment}.sig    — relay serves signature sidecar
 ```
 
-Config additions in `config.yaml` per station:
+Config additions in `config.yaml`:
 - `relay_policy: open | allowlist | closed` — controls whether Follow requests are accepted
 - `ingest_key: <secret>` — if set, requires `Authorization: Bearer <secret>` header on all ingest POSTs
+- `territory: <ISO 3166-1 alpha-2>` — this server's territory (e.g. `"US"` or `"*"` for worldwide). Relays check the source station's `licenseTerritory` against this value before starting a relay session.
+
+### Territory Enforcement
+
+Before a relay starts, the admin API fetches the source station's ActivityPub actor and checks the `licenseTerritory` field:
+- If `licenseTerritory` is empty or `["*"]`, the relay is allowed.
+- Otherwise, the relay server's `territory` config value must be in the list.
+- If not, `POST /admin/stations/{username}/relay/start` returns `403 Forbidden`.
+
+Example in `config.relay.yaml`:
+```yaml
+territory: "US"
+```
+
+### Terminating a Stream
+
+Stream termination is **admin-only** on the source server. Use the admin API:
+```bash
+curl -X POST http://localhost:8080/admin/stations/morning-vibes/stream/stop \
+  -H "Authorization: Bearer secret"
+```
+
+This clears the source's segment store, propagates a `TerminateStream` ActivityPub activity to all relay followers, and triggers a cascading shutdown across the relay graph. External servers cannot trigger termination via the inbox.
 
 ### Testing Two Servers
 
@@ -149,15 +171,6 @@ ffplay http://localhost:8081/stations/morning-vibes/hls/stream.m3u8
 ```
 
 The relay polls the source every 3 seconds, verifies each segment cryptographically, and re-serves it. The listener count appears in the source server logs (`ProofOfListen listenerCount=N`) every 30 seconds.
-
-**To terminate the stream:**
-```bash
-curl -X POST http://localhost:8080/stations/morning-vibes/inbox \
-  -H "Content-Type: application/activity+json" \
-  -d '{"type":"TerminateStream","actor":"http://localhost:8080/stations/morning-vibes","object":"http://localhost:8080/stations/morning-vibes"}'
-```
-
-This cascades: source clears its store → sends TerminateStream to relay's inbox → relay stops its poller and clears its store → ffplay disconnects.
 
 ### Relay environment variables
 
@@ -197,12 +210,13 @@ All require `Authorization: Bearer <admin_key>`.
 
 Station status response:
 ```json
-{"username":"morning-vibes","isLive":true,"segmentCount":8,"isRelaying":false}
+{"username":"morning-vibes","isLive":true,"segmentCount":8,"listenerCount":3,"isRelaying":false}
 ```
 
-Config: add `admin_key` to `config.yaml`:
+Config: add `admin_key` and `territory` to `config.yaml`:
 ```yaml
 admin_key: "your-secret-key"
+territory: "*"   # or "US", "CA", etc.
 ```
 
 ### TUI
