@@ -4,6 +4,7 @@ export interface StationStatus {
   segmentCount: number;
   listenerCount: number;
   isRelaying: boolean;
+  isIngesting: boolean;
 }
 
 export class AdminClient {
@@ -40,5 +41,18 @@ export class AdminClient {
   async stopRelay(username: string): Promise<void> {
     const r = await fetch(`${this.baseURL}/admin/stations/${username}/relay/stop`, { method: 'POST', headers: this.headers() });
     if (!r.ok) throw new Error(`${r.status}`);
+  }
+
+  async startIngest(username: string, audioFile?: string): Promise<void> {
+    const r = await fetch(`${this.baseURL}/admin/stations/${username}/ingest/start`, {
+      method: 'POST', headers: this.headers(),
+      body: JSON.stringify({ audio_file: audioFile ?? '' }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+  }
+
+  async stopIngest(username: string): Promise<void> {
+    const r = await fetch(`${this.baseURL}/admin/stations/${username}/ingest/stop`, { method: 'POST', headers: this.headers() });
+    if (!r.ok) throw new Error(await r.text());
   }
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/jacksonopp/openwaves/internal/actor"
 	"github.com/jacksonopp/openwaves/internal/admin"
 	"github.com/jacksonopp/openwaves/internal/adminui"
+	"github.com/jacksonopp/openwaves/internal/broadcaster"
 	"github.com/jacksonopp/openwaves/internal/config"
 	"github.com/jacksonopp/openwaves/internal/hls"
 	"github.com/jacksonopp/openwaves/internal/inbox"
@@ -49,6 +50,7 @@ func main() {
 
 	followerStore := inbox.NewFollowerStore()
 	relayMgr := relay.NewManager(store, privKeys)
+	bcMgr := broadcaster.NewManager()
 
 	router := mux.NewRouter()
 
@@ -76,7 +78,7 @@ func main() {
 
 	router.HandleFunc("/stations/{username}/inbox", inbox.Handler(cfg, followerStore, nil)).Methods(http.MethodPost)
 
-	router.PathPrefix("/admin").Handler(admin.Handler(cfg, store, followerStore, relayMgr, logStream))
+	router.PathPrefix("/admin").Handler(admin.Handler(cfg, store, followerStore, relayMgr, logStream, bcMgr))
 
 	router.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)

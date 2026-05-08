@@ -38,6 +38,7 @@ func ManifestHandler(cfg *config.Config, store *Store, targetDuration int) http.
 		playlist := Manifest(store, username, baseURL, targetDuration)
 
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(playlist))
 	}
@@ -68,6 +69,7 @@ func SegmentHandler(cfg *config.Config, store *Store) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "video/mp2t")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.WriteHeader(http.StatusOK)
 		w.Write(seg.Data)
 	}

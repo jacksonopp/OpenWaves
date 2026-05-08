@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/jacksonopp/openwaves/internal/broadcaster"
 	"github.com/jacksonopp/openwaves/internal/config"
 	"github.com/jacksonopp/openwaves/internal/hls"
 	"github.com/jacksonopp/openwaves/internal/inbox"
@@ -24,19 +25,22 @@ type StationStatus struct {
 	SegmentCount  int    `json:"segmentCount"`
 	ListenerCount int    `json:"listenerCount"`
 	IsRelaying    bool   `json:"isRelaying"`
+	IsIngesting   bool   `json:"isIngesting"`
 }
 
 // Handler returns an http.Handler (gorilla/mux sub-router) for all /admin/* routes.
 // Mount it at /admin in the main router.
-func Handler(cfg *config.Config, store *hls.Store, followerStore *inbox.FollowerStore, relayMgr *relay.Manager, stream *logstream.Stream) http.Handler {
+func Handler(cfg *config.Config, store *hls.Store, followerStore *inbox.FollowerStore, relayMgr *relay.Manager, stream *logstream.Stream, bcMgr *broadcaster.Manager) http.Handler {
 	r := mux.NewRouter()
 	r.Use(authMiddleware(cfg.AdminKey))
-	r.HandleFunc("/admin/stations", listStationsHandler(cfg, store, relayMgr)).Methods(http.MethodGet)
-	r.HandleFunc("/admin/stations/{username}", getStationHandler(cfg, store, relayMgr)).Methods(http.MethodGet)
+	r.HandleFunc("/admin/stations", listStationsHandler(cfg, store, relayMgr, bcMgr)).Methods(http.MethodGet)
+	r.HandleFunc("/admin/stations/{username}", getStationHandler(cfg, store, relayMgr, bcMgr)).Methods(http.MethodGet)
 	r.HandleFunc("/admin/stations/{username}/stream/stop", stopStreamHandler(cfg, store, followerStore, relayMgr)).Methods(http.MethodPost)
 	r.HandleFunc("/admin/stations/{username}/stream/start", startStreamHandler(cfg, store)).Methods(http.MethodPost)
 	r.HandleFunc("/admin/stations/{username}/relay/start", startRelayHandler(cfg, relayMgr)).Methods(http.MethodPost)
 	r.HandleFunc("/admin/stations/{username}/relay/stop", stopRelayHandler(cfg, relayMgr)).Methods(http.MethodPost)
+	r.HandleFunc("/admin/stations/{username}/ingest/start", startIngestHandler(cfg, bcMgr)).Methods(http.MethodPost)
+	r.HandleFunc("/admin/stations/{username}/ingest/stop", stopIngestHandler(cfg, bcMgr)).Methods(http.MethodPost)
 	r.HandleFunc("/admin/logs", stream.Handler()).Methods(http.MethodGet)
 	return r
 }
@@ -58,7 +62,7 @@ func authMiddleware(adminKey string) mux.MiddlewareFunc {
 	}
 }
 
-func stationStatus(username string, store *hls.Store, relayMgr *relay.Manager) StationStatus {
+func stationStatus(username string, store *hls.Store, relayMgr *relay.Manager, bcMgr *broadcaster.Manager) StationStatus {
 	segs := store.Segments(username)
 	return StationStatus{
 		Username:      username,
@@ -66,15 +70,16 @@ func stationStatus(username string, store *hls.Store, relayMgr *relay.Manager) S
 		SegmentCount:  len(segs),
 		ListenerCount: store.ListenerCount(username),
 		IsRelaying:    relayMgr.IsRelaying(username),
+		IsIngesting:   bcMgr.IsRunning(username),
 	}
 }
 
-func listStationsHandler(cfg *config.Config, store *hls.Store, relayMgr *relay.Manager) http.HandlerFunc {
+func listStationsHandler(cfg *config.Config, store *hls.Store, relayMgr *relay.Manager, bcMgr *broadcaster.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		registry := cfg.Registry()
 		statuses := make([]StationStatus, 0, len(registry))
 		for username := range registry {
-			statuses = append(statuses, stationStatus(username, store, relayMgr))
+			statuses = append(statuses, stationStatus(username, store, relayMgr, bcMgr))
 		}
 		sort.Slice(statuses, func(i, j int) bool {
 			return statuses[i].Username < statuses[j].Username
@@ -84,7 +89,7 @@ func listStationsHandler(cfg *config.Config, store *hls.Store, relayMgr *relay.M
 	}
 }
 
-func getStationHandler(cfg *config.Config, store *hls.Store, relayMgr *relay.Manager) http.HandlerFunc {
+func getStationHandler(cfg *config.Config, store *hls.Store, relayMgr *relay.Manager, bcMgr *broadcaster.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		username := mux.Vars(r)["username"]
 		registry := cfg.Registry()
@@ -93,7 +98,7 @@ func getStationHandler(cfg *config.Config, store *hls.Store, relayMgr *relay.Man
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(stationStatus(username, store, relayMgr))
+		json.NewEncoder(w).Encode(stationStatus(username, store, relayMgr, bcMgr))
 	}
 }
 
@@ -219,6 +224,50 @@ func stopRelayHandler(cfg *config.Config, relayMgr *relay.Manager) http.HandlerF
 		}
 		relayMgr.StopRelay(username)
 		log.Printf("admin: stopped relay for station %s", username)
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func startIngestHandler(cfg *config.Config, bcMgr *broadcaster.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		username := mux.Vars(r)["username"]
+		registry := cfg.Registry()
+		if _, ok := registry[username]; !ok {
+			http.Error(w, "station not found", http.StatusNotFound)
+			return
+		}
+
+		var body struct {
+			AudioFile string `json:"audio_file"`
+		}
+		// Body is optional — ignore decode errors.
+		_ = json.NewDecoder(r.Body).Decode(&body)
+
+		if err := bcMgr.Start(username, cfg.BaseURL(), body.AudioFile); err != nil {
+			log.Printf("admin: failed to start ingest for %s: %v", username, err)
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		log.Printf("admin: started ingest for station %s", username)
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func stopIngestHandler(cfg *config.Config, bcMgr *broadcaster.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		username := mux.Vars(r)["username"]
+		registry := cfg.Registry()
+		if _, ok := registry[username]; !ok {
+			http.Error(w, "station not found", http.StatusNotFound)
+			return
+		}
+
+		if err := bcMgr.Stop(username); err != nil {
+			log.Printf("admin: failed to stop ingest for %s: %v", username, err)
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		log.Printf("admin: stopped ingest for station %s", username)
 		w.WriteHeader(http.StatusOK)
 	}
 }
