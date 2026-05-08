@@ -28,7 +28,10 @@ Build the core logic that segments audio into HLS `.m3u8` format and serves it w
 **Done.** The HLS pipeline is fully implemented across four packages:
 
 - **`internal/keystore/`** — RSA-2048 key pairs generated per station on first run, persisted to `keys/<username>.pem` and `keys/<username>.pub.pem`. The public key is populated in the Station actor document at `publicKey.publicKeyPem`.
-- **`internal/hls/`** — Thread-safe in-memory segment ring buffer (`Store`, last 10 segments), live `.m3u8` manifest builder, RSA-PKCS1v15/SHA-256 segment signer, and three HTTP handler factories (`ManifestHandler`, `SegmentHandler`, `SigHandler`).
+- **`internal/hls/`** — Thread-safe in-memory segment ring buffer (`Store`, last 10 segments), live `.m3u8` manifest builder, RSA-PKCS1v15/SHA-256 segment signer, and three HTTP handler factories (`ManifestHandler`, `SegmentHandler`, `SigHandler`). The `Store` also tracks:
+  - **Liveness** (`IsLive`): a station is considered live if a segment arrived within the last 20 seconds. Stale ring-buffer segments don't falsely indicate liveness.
+  - **Listeners** (`TrackListener` / `ListenerCount`): every `GET stream.m3u8` request records the client IP. `ListenerCount` returns unique IPs active in the last 35 seconds.
+  - **Ingest suspension** (`Suspend` / `Resume` / `IsSuspended`): `stream/stop` suspends the station; new ingest POSTs return `503` until `stream/start` resumes it.
 - **`internal/ingest/`** — `SegmentIngestor` accepts individual `.ts` segments POSTed by the broadcaster, signs each one, and stores it in the ring buffer. **FFmpeg runs on the broadcaster's machine, not the server.**
 - **`bin/broadcast.sh`** — broadcaster-side client script. Runs FFmpeg locally to produce `.ts` segments and POSTs each new segment to the server as it appears.
 
@@ -40,7 +43,7 @@ GET  /stations/{username}/hls/{segment}       — .ts segment bytes
 GET  /stations/{username}/hls/{segment}.sig   — RSA signature for the segment
 ```
 
-The Station actor's `isLive` and `broadcastStatus` fields are updated dynamically based on whether the store has active segments.
+The Station actor's `isLive` and `broadcastStatus` fields are updated dynamically: `isLive` is `true` only if a segment arrived within the last 20 seconds.
 
 Config additions in `config.yaml`:
 - `keys_dir: keys` — where key pairs are stored (gitignored)
@@ -90,7 +93,8 @@ This is the most unique feature. Build the code that allows Server B to subscrib
 - **`internal/inbox/`** — `POST /stations/{username}/inbox` handler. Dispatches on activity type:
   - `Follow` — fetches the remote actor, checks `relay_policy` (`closed` → send Reject; `open`/`allowlist` → store follower, send Accept)
   - `ProofOfListen` — logs aggregate listener count and timestamp
-  - `TerminateStream` and unknown types → 202 Accepted (ignored — TerminateStream is admin-only, not an inbox activity)
+  - `TerminateStream` — on **relay servers**, if the actor URL matches the active source, stops the relay session. On **source servers**, silently accepted with 202 (termination is admin-only there).
+  - Unknown types → 202 Accepted
 - **`internal/relay/`** — Active relay session manager:
   - `Manager` — mutex-guarded session map; `StartRelay`, `StopRelay`, `IsRelaying`
   - `Session` — wraps a context + done channel; starts two goroutines on `start()`
@@ -107,7 +111,7 @@ POST /stations/{username}/inbox   — ActivityPub inbox (Follow, ProofOfListen)
 Relay server routes:
 ```
 GET /stations/{username}                      — relay station actor (publicKey for verification)
-POST /stations/{username}/inbox               — inbox (Follow, ProofOfListen only)
+POST /stations/{username}/inbox               — inbox (Follow, ProofOfListen, TerminateStream from source)
 GET /stations/{username}/hls/stream.m3u8      — relay serves live manifest to local listeners
 GET /stations/{username}/hls/{segment}        — relay serves verified segment bytes
 GET /stations/{username}/hls/{segment}.sig    — relay serves signature sidecar
@@ -138,7 +142,18 @@ curl -X POST http://localhost:8080/admin/stations/morning-vibes/stream/stop \
   -H "Authorization: Bearer secret"
 ```
 
-This clears the source's segment store, propagates a `TerminateStream` ActivityPub activity to all relay followers, and triggers a cascading shutdown across the relay graph. External servers cannot trigger termination via the inbox.
+This does the following:
+1. **Suspends ingest** — the server rejects any further segment POSTs from the broadcaster with `503`. The broadcaster process can keep running but its uploads are blocked until `stream/start` is called.
+2. **Propagates TerminateStream** — sends a `TerminateStream` ActivityPub activity to all known relay followers.
+3. **Relay cascade** — each relay server's inbox verifies the actor URL matches its active source and stops the relay poller, purging buffered segments.
+
+To restart the stream (re-enable ingest for a fresh broadcast):
+```bash
+curl -X POST http://localhost:8080/admin/stations/morning-vibes/stream/start \
+  -H "Authorization: Bearer secret"
+```
+
+Then run `bin/broadcast.sh` again to begin a new broadcast.
 
 ### Testing Two Servers
 
@@ -203,8 +218,8 @@ All require `Authorization: Bearer <admin_key>`.
 |---|---|---|
 | `GET` | `/admin/stations` | List all stations with live/relay status |
 | `GET` | `/admin/stations/{username}` | Single station status |
-| `POST` | `/admin/stations/{username}/stream/stop` | Terminate stream (clears store, propagates TerminateStream to followers) |
-| `POST` | `/admin/stations/{username}/stream/start` | Reset store for a fresh ingest |
+| `POST` | `/admin/stations/{username}/stream/stop` | Suspend ingest + propagate TerminateStream to relay followers |
+| `POST` | `/admin/stations/{username}/stream/start` | Resume ingest (re-enable after stop, ready for fresh broadcast) |
 | `POST` | `/admin/stations/{username}/relay/start` | Start relay (body: `{"source_url":"..."}`) |
 | `POST` | `/admin/stations/{username}/relay/stop` | Stop relay |
 
@@ -265,14 +280,14 @@ esc: back  b: broadcast  B: stop broadcast  s: stop stream  ...
 ### Example: start/stop a stream without restarting the server
 
 ```bash
-# Stop the current stream (propagates TerminateStream to all relays):
+# Stop the current stream (suspends ingest + propagates TerminateStream to all relays):
 curl -X POST http://localhost:8080/admin/stations/morning-vibes/stream/stop \
   -H "Authorization: Bearer your-secret-key"
 
-# Clear state and allow a fresh ingest to start:
+# Re-enable ingest for a fresh broadcast:
 curl -X POST http://localhost:8080/admin/stations/morning-vibes/stream/start \
   -H "Authorization: Bearer your-secret-key"
 
-# Then run broadcast.sh again to start a new stream
+# Then run broadcast.sh again to start a new stream:
 ./bin/broadcast.sh morning-vibes http://localhost:8080 60
 ```
