@@ -6,18 +6,21 @@ This document outlines the planned work after completing the core protocol imple
 
 ## ✅ 6. Admin Web UI
 
-**Done.** A React + Vite SPA is embedded in the Go binary and served at `/admin/ui/`. It exposes all station management operations (view status, start/stop streams and relays, manage ingest subprocesses, view live log feed) through a browser interface. See `internal/adminui/`, `internal/broadcaster/`, and `ui/` for the implementation, and `docs/get-started.md § 6` for the full build and dev workflow.
+**Done.** A React + Vite SPA is embedded in the Go binary and served at `/admin/ui/`. The UI was subsequently redesigned to match the Figma spec (see [`docs/admin-ui-design.md`](./admin-ui-design.md)):
+
+- Two-panel layout: fixed 256px sidebar with nav (Overview, Streams, Moderation, Federation) + scrollable main content
+- **TanStack Router** for client-side routing; **TanStack Query** for data polling (`refetchInterval: 3000`); **CSS Modules** for scoped styles
+- `StreamsPage` — live station list with per-card controls (Monitor inline HLS player, relay/ingest settings, stop)
+- `OverviewPage` — station stats + live log feed
+- Light theme with indigo accent (`#6366f1`) per Figma design
+
+See `internal/adminui/`, `internal/broadcaster/`, and `ui/` for the implementation, and `docs/get-started.md § 6` for the full build and dev workflow.
 
 ---
 
-## 7. Docker Packaging
+## ✅ 7. Docker Packaging
 
-Package the server as a single Docker image for production distribution.
-
-- Single image containing the compiled Go binary and embedded admin UI (no external assets needed)
-- Config via environment variables or a mounted `config.yaml`
-- Publish to a container registry
-- Document a minimal `docker-compose.yml` for source + relay setups
+**Done.** A single image (`ghcr.io/jacksonopp/openwaves`) contains both the `server` and `relay` binaries, the embedded admin UI, and `ffmpeg` for the Start Ingest feature. Keys are persisted via named Docker volumes; config is bind-mounted. The GitHub Actions workflow (`.github/workflows/docker.yml`) publishes `latest` on pushes to `main` and semver tags on `v*.*.*` git tags; PRs build but do not push. See `docs/get-started.md § 7` for the full quick-start, standalone run commands, Compose structure, and publishing details. New files: `Dockerfile`, `docker-compose.yml`, `.github/workflows/docker.yml`.
 
 ---
 
@@ -90,6 +93,6 @@ The protocol spec (`docs/core.md`) describes defederation — admins muting or b
 
 ## Notes
 
-- **FFmpeg dependency**: FFmpeg is required on the **broadcaster's machine** and by the TUI player (`ffplay`). The server itself never invokes FFmpeg. Removing or bundling FFmpeg is not a near-term priority since the TUI is dev-only.
+- **FFmpeg dependency**: FFmpeg is bundled in the Docker image (`alpine:3.21` runtime stage) so the "Start Ingest" button in the admin UI can spawn `bin/broadcast.sh` inside the container. For deployments outside Docker, FFmpeg must still be installed on whatever machine runs `bin/broadcast.sh`. The `ffplay` command (used for dev-only local stream monitoring) is a separate concern and is not included in the image.
 - **openwaves:// URI scheme**: Mentioned in `docs/core.md` as a deep-link format for client apps. Relevant once the client/user UI is being built.
 - **HTTPS**: Production deployments should run behind a reverse proxy (nginx, Caddy) that terminates TLS. The server itself uses `scheme: https` in config to generate correct actor URLs without needing to handle TLS directly.

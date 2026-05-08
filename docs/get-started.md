@@ -323,18 +323,29 @@ A browser-based admin UI embedded directly in the Go binary, providing a full st
 
 ### Frontend (ui/)
 
-The SPA lives in `ui/` and is built independently before embedding:
+The SPA lives in `ui/` and is built independently before embedding.
+
+**Libraries:** React 19, TypeScript, Vite, [TanStack Router](https://tanstack.com/router) (client-side routing), [TanStack Query](https://tanstack.com/query) (data fetching + polling), CSS Modules (scoped per-component styles).
+
+**Visual design:** Two-panel layout (fixed 256px sidebar + scrollable main area) matching the Figma spec. See [`docs/admin-ui-design.md`](./admin-ui-design.md) for color tokens, typography, and component patterns.
 
 | File | Purpose |
 |---|---|
 | `ui/src/api/client.ts` | Typed `AdminClient` class wrapping all admin API endpoints |
 | `ui/src/context/AuthContext.tsx` | Admin key stored in `localStorage`; injects `Authorization` header |
-| `ui/src/pages/Login.tsx` | Simple key entry form |
-| `ui/src/pages/Dashboard.tsx` | Station list with polling |
-| `ui/src/components/StationCard.tsx` | Per-station card: live/relay/ingest status, start/stop controls |
+| `ui/src/App.tsx` | TanStack Router route tree; wraps app with `QueryClientProvider` + `AuthProvider` |
+| `ui/src/pages/Login.tsx` | Admin key entry form (light theme) |
+| `ui/src/pages/admin/StreamsPage.tsx` | Active streams list with TanStack Query polling (`refetchInterval: 3000`) |
+| `ui/src/pages/admin/OverviewPage.tsx` | Station stats (total / live / relaying) + live log feed |
+| `ui/src/pages/admin/ModerationPage.tsx` | Placeholder — moderation tools |
+| `ui/src/pages/admin/FederationPage.tsx` | Placeholder — ActivityPub federation management |
+| `ui/src/components/admin/AdminLayout.tsx` | Outer shell: top bar + sidebar + `<Outlet />` |
+| `ui/src/components/admin/TopBar.tsx` | Brand, Client/Admin toggle tabs, "Federated via ActivityPub" |
+| `ui/src/components/admin/Sidebar.tsx` | Nav items (Overview, Streams, Moderation, Federation) + user profile footer |
+| `ui/src/components/admin/StreamCard.tsx` | Per-station card: LIVE/OFFLINE badge, listener count, inline HLS player (Monitor), relay/ingest controls (Settings) |
+| `ui/src/components/admin/StartStreamModal.tsx` | Modal for selecting a station and starting ingest |
 | `ui/src/components/HLSPlayer.tsx` | hls.js audio player configured for live streaming |
 | `ui/src/components/LogFeed.tsx` | Connects to `GET /admin/logs` SSE stream and displays log lines |
-| `ui/src/App.tsx` | React Router v6 shell (`/` → Login, `/dashboard` → Dashboard) |
 
 ### HLS live playback configuration
 
@@ -391,3 +402,97 @@ The resulting binary serves the SPA at `/admin/ui/` with no external dependencie
 |---|---|---|
 | `ADMINUI_DEV_PROXY` | `http://localhost:5173` | Vite dev server URL (used in `admindev` build only) |
 | `BROADCAST_SCRIPT` | `./bin/broadcast.sh` | Path to the broadcast script spawned by `ingest/start` |
+
+---
+
+## ✅ 7. Docker Packaging
+
+A single Docker image containing both the `server` and `relay` binaries, the embedded admin UI, and all runtime dependencies (including ffmpeg for the Start Ingest feature).
+
+**Done.** Three new files implement the full packaging and publishing pipeline:
+
+- **`Dockerfile`** — multi-stage build: `node:22-alpine` builds the React SPA → `golang:1.26-alpine` compiles both Go binaries with the embedded UI → `alpine:3.21` runtime image with `ffmpeg`, `curl`, and `bash` installed. Both `./server` and `./relay` land at `/app/`.
+- **`docker-compose.yml`** — example composition with a `source` service (running `./server`) and a `relay` service (overriding the command to `["./relay"]`).
+- **`.github/workflows/docker.yml`** — GitHub Actions workflow that builds the image and pushes to `ghcr.io/jacksonopp/openwaves` on every push to `main` (tagged `latest`) and on `v*.*.*` git tags (tagged with the full semver, e.g. `1.2.3`, and the minor prefix `1.2`). PRs build the image but do not push.
+
+### Quick start (pre-built image)
+
+```bash
+# Copy the example config and edit it for your environment:
+cp config.yaml config.my.yaml
+
+# Then bring up both services with Compose:
+docker compose up
+```
+
+The `docker-compose.yml` in the repo contains a ready-to-use `source` + `relay` pair. Edit the bind-mounted `config.yaml` paths and environment variables to suit your deployment before starting.
+
+### Building the image locally
+
+The Dockerfile runs the UI build internally, so a plain `docker build` is self-contained:
+
+```bash
+docker build -t openwaves .
+```
+
+Alternatively, build via Compose (same result, uses the project name as the image tag):
+
+```bash
+docker compose build
+```
+
+If you want to build the Go binary outside Docker (e.g. for faster iteration), build the UI first so the embed step succeeds:
+
+```bash
+cd ui && npm run build   # outputs ui/dist/ — required for embed_prod.go
+go build ./...
+```
+
+### Running the source server standalone
+
+```bash
+docker run -p 8080:8080 \
+  -v ./config.yaml:/app/config.yaml:ro \
+  -v openwaves-keys:/app/keys \
+  ghcr.io/jacksonopp/openwaves:latest
+```
+
+- Config is bind-mounted read-only; override the path with the `CONFIG_PATH` env var.
+- RSA key pairs are persisted in the named volume `openwaves-keys` at `/app/keys`.
+
+### Running the relay standalone
+
+```bash
+docker run -p 8081:8081 \
+  -e SOURCE_URL=http://source:8080/stations/morning-vibes \
+  -e LOCAL_USERNAME=morning-vibes \
+  -e PORT=8081 \
+  -e KEYS_DIR=/app/keys-relay \
+  -v relay-keys:/app/keys-relay \
+  ghcr.io/jacksonopp/openwaves:latest ./relay
+```
+
+The relay binary is selected by passing `./relay` as the container command. All relay configuration is supplied via environment variables (see the relay env-var table in § 4 above).
+
+### `docker-compose.yml` structure
+
+The bundled Compose file defines two services:
+
+| Service | Binary | Port | Config |
+|---|---|---|---|
+| `source` | `./server` (default entrypoint) | `8080` | bind-mounts `./config.yaml` → `/app/config.yaml`; named volume for `/app/keys` |
+| `relay` | `./relay` (command override) | `8081` | all relay config via environment variables; named volume for `/app/keys-relay` |
+
+Both services pull `ghcr.io/jacksonopp/openwaves:latest` by default; replace with a local build tag after `docker compose build`.
+
+### GitHub Actions publishing
+
+The workflow at `.github/workflows/docker.yml` runs on every `push` event:
+
+| Trigger | Image tag(s) pushed |
+|---|---|
+| Push to `main` | `ghcr.io/jacksonopp/openwaves:latest` |
+| Push of `v*.*.*` tag | `ghcr.io/jacksonopp/openwaves:1.2.3` **and** `ghcr.io/jacksonopp/openwaves:1.2` |
+| Pull request | Image is built (to catch breakage) but **not** pushed |
+
+Authentication uses the automatic `GITHUB_TOKEN`; no additional secrets are required for publishing to `ghcr.io` within the same repository.

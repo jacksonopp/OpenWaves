@@ -1,0 +1,71 @@
+.page {
+  padding: 32px;
+  background: #fafafa;
+  min-height: 100%;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  gap: 16px;
+}
+
+.headingGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.heading {
+  font-size: 24px;
+  font-weight: 600;
+  color: #0a0a0a;
+  margin: 0;
+}
+
+.subtitle {
+  font-size: 14px;
+  color: #717182;
+  margin: 0;
+}
+
+.btnNewStream {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 20px;
+  border: none;
+  border-radius: 8px;
+  background: #6366f1;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.btnNewStream:hover {
+  background: #4f46e5;
+}
+
+.stationList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.emptyState {
+  font-size: 14px;
+  color: #717182;
+  padding: 16px 0;
+}
+
+.errorMsg {
+  font-size: 14px;
+  color: #ef4444;
+  margin-bottom: 16px;
+}

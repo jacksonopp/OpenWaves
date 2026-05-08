@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+ui/node_modules/
+
+# Build outputs (produced inside Docker, no need to send from host)
+ui/dist/
+internal/adminui/dist/*
+
+# Compiled binaries
+bin/server
+bin/relay
+
+# Keys and secrets (never include in image)
+keys/
+keys-*/
+
+# Version control
+.git/
+.gitignore
+
+# IDE / OS
+.vscode/
+.DS_Store
+
+# Test and coverage artifacts
+*.test
+*.out
+.coverprofile

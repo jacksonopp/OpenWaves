@@ -1,0 +1,22 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #fafafa;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+}
+
+.body {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  overflow: hidden;
+  margin-top: 57px;
+}
+
+.main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  background: #fafafa;
+}

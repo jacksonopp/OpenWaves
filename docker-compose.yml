@@ -1,0 +1,50 @@
+# docker-compose.yml — OpenWaves source + relay example
+#
+# Usage:
+#   1. Copy config.yaml to the project root and set domain/admin_key/stations.
+#   2. docker compose up
+#
+# The source server runs on :8080.
+# The relay server runs on :8081 and relays the "morning-vibes" station from the
+# source. Adjust SOURCE_URL and LOCAL_USERNAME to match your config.
+
+services:
+  source:
+    image: ghcr.io/jacksonopp/openwaves:latest
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      # Bind-mount your config.yaml (read-only).
+      - ./config.yaml:/app/config.yaml:ro
+      # RSA key pairs are generated on first start and must persist.
+      - source-keys:/app/keys
+    environment:
+      PORT: "8080"
+    restart: unless-stopped
+
+  relay:
+    image: ghcr.io/jacksonopp/openwaves:latest
+    build: .
+    # Override CMD to run the relay binary instead of the source server.
+    command: ["./relay"]
+    ports:
+      - "8081:8081"
+    volumes:
+      - relay-keys:/app/keys-relay
+    environment:
+      SOURCE_URL: "http://source:8080/stations/morning-vibes"
+      LOCAL_USERNAME: "morning-vibes"
+      PORT: "8081"
+      # Set DOMAIN to the public hostname of the relay (e.g. relay.example.com).
+      DOMAIN: "localhost:8081"
+      SCHEME: "http"
+      RELAY_POLICY: "open"
+      KEYS_DIR: "/app/keys-relay"
+    depends_on:
+      - source
+    restart: unless-stopped
+
+volumes:
+  source-keys:
+  relay-keys:

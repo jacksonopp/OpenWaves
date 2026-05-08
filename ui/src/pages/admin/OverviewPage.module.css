@@ -1,0 +1,63 @@
+.page {
+  padding: 32px;
+  max-width: 960px;
+}
+
+.header {
+  margin-bottom: 28px;
+}
+
+.heading {
+  font-size: 24px;
+  font-weight: 600;
+  color: #0a0a0a;
+  margin: 0 0 6px 0;
+}
+
+.subtitle {
+  font-size: 14px;
+  color: #717182;
+  margin: 0;
+}
+
+.statsRow {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.statCard {
+  flex: 1;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.statNumber {
+  font-size: 32px;
+  font-weight: 700;
+  color: #0a0a0a;
+  line-height: 1;
+}
+
+.statLabel {
+  font-size: 14px;
+  color: #717182;
+}
+
+.logsSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sectionHeading {
+  font-size: 16px;
+  font-weight: 600;
+  color: #0a0a0a;
+  margin: 0;
+}

@@ -1,0 +1,90 @@
+.topBar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  height: 57px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  background: #ffffff;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  box-sizing: border-box;
+}
+
+.left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo {
+  font-size: 18px;
+  font-weight: 600;
+  color: #6366f1;
+  letter-spacing: -0.5px;
+}
+
+.brandName {
+  font-size: 16px;
+  font-weight: 600;
+  color: #0a0a0a;
+  white-space: nowrap;
+}
+
+.divider {
+  width: 1px;
+  height: 24px;
+  background: rgba(0, 0, 0, 0.1);
+  margin: 0 4px;
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tabClient {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
+  background: #eceef2;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #0a0a0a;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.tabClient:hover {
+  background: #e0e2e8;
+}
+
+.tabAdmin {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
+  background: #6366f1;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+}
+
+.fedText {
+  font-size: 14px;
+  color: #717182;
+}

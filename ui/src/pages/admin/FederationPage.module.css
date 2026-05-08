@@ -1,0 +1,57 @@
+.page {
+  padding: 32px;
+  max-width: 960px;
+}
+
+.header {
+  margin-bottom: 28px;
+}
+
+.heading {
+  font-size: 24px;
+  font-weight: 600;
+  color: #0a0a0a;
+  margin: 0 0 6px 0;
+}
+
+.subtitle {
+  font-size: 14px;
+  color: #717182;
+  margin: 0;
+}
+
+.emptyCard {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  padding: 48px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+}
+
+.emptyIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  background: rgba(99, 102, 241, 0.08);
+  border-radius: 16px;
+  margin-bottom: 4px;
+}
+
+.emptyHeading {
+  font-size: 16px;
+  font-weight: 600;
+  color: #0a0a0a;
+  margin: 0;
+}
+
+.emptyText {
+  font-size: 14px;
+  color: #717182;
+  margin: 0;
+}

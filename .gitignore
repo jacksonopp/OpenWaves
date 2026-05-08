@@ -1,5 +1,6 @@
 # Binaries
 bin/
+!bin/*.sh
 cmd/server/__debug*
 *.exe
 *.test
