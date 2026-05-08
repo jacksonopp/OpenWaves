@@ -13,6 +13,7 @@ import (
 	"github.com/jacksonopp/openwaves/internal/config"
 	"github.com/jacksonopp/openwaves/internal/hls"
 	"github.com/jacksonopp/openwaves/internal/inbox"
+	"github.com/jacksonopp/openwaves/internal/logstream"
 	"github.com/jacksonopp/openwaves/internal/relay"
 )
 
@@ -27,7 +28,7 @@ type StationStatus struct {
 
 // Handler returns an http.Handler (gorilla/mux sub-router) for all /admin/* routes.
 // Mount it at /admin in the main router.
-func Handler(cfg *config.Config, store *hls.Store, followerStore *inbox.FollowerStore, relayMgr *relay.Manager) http.Handler {
+func Handler(cfg *config.Config, store *hls.Store, followerStore *inbox.FollowerStore, relayMgr *relay.Manager, stream *logstream.Stream) http.Handler {
 	r := mux.NewRouter()
 	r.Use(authMiddleware(cfg.AdminKey))
 	r.HandleFunc("/admin/stations", listStationsHandler(cfg, store, relayMgr)).Methods(http.MethodGet)
@@ -36,6 +37,7 @@ func Handler(cfg *config.Config, store *hls.Store, followerStore *inbox.Follower
 	r.HandleFunc("/admin/stations/{username}/stream/start", startStreamHandler(cfg, store)).Methods(http.MethodPost)
 	r.HandleFunc("/admin/stations/{username}/relay/start", startRelayHandler(cfg, relayMgr)).Methods(http.MethodPost)
 	r.HandleFunc("/admin/stations/{username}/relay/stop", stopRelayHandler(cfg, relayMgr)).Methods(http.MethodPost)
+	r.HandleFunc("/admin/logs", stream.Handler()).Methods(http.MethodGet)
 	return r
 }
 

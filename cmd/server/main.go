@@ -4,6 +4,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -12,11 +13,13 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/jacksonopp/openwaves/internal/actor"
 	"github.com/jacksonopp/openwaves/internal/admin"
+	"github.com/jacksonopp/openwaves/internal/adminui"
 	"github.com/jacksonopp/openwaves/internal/config"
 	"github.com/jacksonopp/openwaves/internal/hls"
 	"github.com/jacksonopp/openwaves/internal/inbox"
 	"github.com/jacksonopp/openwaves/internal/ingest"
 	"github.com/jacksonopp/openwaves/internal/keystore"
+	"github.com/jacksonopp/openwaves/internal/logstream"
 	"github.com/jacksonopp/openwaves/internal/relay"
 	"github.com/jacksonopp/openwaves/internal/webfinger"
 	"github.com/jacksonopp/openwaves/static"
@@ -41,10 +44,16 @@ func main() {
 
 	store := hls.NewStore(10)
 
+	logStream := logstream.New()
+	log.SetOutput(io.MultiWriter(os.Stderr, logStream))
+
 	followerStore := inbox.NewFollowerStore()
 	relayMgr := relay.NewManager(store, privKeys)
 
 	router := mux.NewRouter()
+
+	// Admin web UI — must be registered before the /admin API prefix.
+	router.PathPrefix("/admin/ui").Handler(adminui.Handler())
 
 	router.HandleFunc("/ns/openwaves", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/ld+json")
@@ -67,7 +76,7 @@ func main() {
 
 	router.HandleFunc("/stations/{username}/inbox", inbox.Handler(cfg, followerStore, nil)).Methods(http.MethodPost)
 
-	router.PathPrefix("/admin").Handler(admin.Handler(cfg, store, followerStore, relayMgr))
+	router.PathPrefix("/admin").Handler(admin.Handler(cfg, store, followerStore, relayMgr, logStream))
 
 	router.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)

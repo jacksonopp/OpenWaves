@@ -11,6 +11,7 @@ cmd/server/__debug*
 # IDEs and editor files
 .vscode/*
 !.vscode/launch.json
+!.vscode/tasks.json
 .idea/
 
 # OS files
@@ -19,3 +20,9 @@ cmd/server/__debug*
 # Keys directory
 keys/
 keys-*/
+
+# Admin UI build output (keep placeholder index.html)
+ui/node_modules/
+ui/dist/
+internal/adminui/dist/*
+!internal/adminui/dist/index.html
