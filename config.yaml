@@ -5,6 +5,10 @@ keys_dir: keys
 admin_key: "secret"  # set a secret to enable the /admin API and TUI control
 territory: "*"        # this server broadcasts worldwide
 
+database:
+  driver: sqlite       # sqlite | postgres | mysql | mssql
+  dsn: openwaves.db    # file path for sqlite; DSN string for other drivers
+
 stations:
   - username: "morning-vibes"
     name: "Morning Vibes Radio"

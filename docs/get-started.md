@@ -243,9 +243,32 @@ Station status response now includes `audioInput` and `isStatic`:
 }
 ```
 
+### Database Configuration
+
+OpenWaves uses SQL to persist dynamic channels and (in future releases) all other server data — user accounts, federation metadata, etc. The database is configured in `config.yaml`:
+
+```yaml
+database:
+  driver: sqlite       # sqlite | postgres | mysql | mssql
+  dsn: openwaves.db    # see driver-specific DSN formats below
+```
+
+**Supported drivers:**
+
+| Driver | `driver` value | `dsn` format |
+|---|---|---|
+| SQLite (default) | `sqlite` | File path, e.g. `openwaves.db` or `:memory:` for tests |
+| PostgreSQL | `postgres` | `host=localhost user=openwaves password=secret dbname=openwaves port=5432 sslmode=disable` |
+| MySQL / MariaDB | `mysql` | `openwaves:secret@tcp(localhost:3306)/openwaves?charset=utf8mb4&parseTime=True&loc=Local` |
+| SQL Server | `mssql` | `sqlserver://openwaves:secret@localhost:1433?database=openwaves` |
+
+The default configuration uses SQLite with a single file (`openwaves.db` in the working directory), which requires no external database server. For production deployments, PostgreSQL is recommended.
+
+> **Upgrade note:** `channels.json` (used in prior versions for dynamic channel persistence) is no longer read. If you have existing dynamic channels in `channels.json`, recreate them via the admin API (`POST /admin/channels`) after upgrading.
+
 ### Dynamic channels
 
-Channels can be created and deleted at runtime without editing `config.yaml`. Dynamic channels are persisted to `channels.json` (sibling to `config.yaml`) and survive server restarts.
+Channels can be created and deleted at runtime without editing `config.yaml`. Dynamic channels are persisted to the configured SQL database and survive server restarts.
 
 ```bash
 # Create a new channel

@@ -5,6 +5,10 @@ keys_dir: keys-relay
 admin_key: "relay-secret"  # set a secret to enable the /admin API and TUI control
 territory: "US"             # this relay only re-hosts streams licensed for the US
 
+database:
+  driver: sqlite
+  dsn: relay-openwaves.db
+
 stations:
   - username: "relay-one"
     name: "Relay One"

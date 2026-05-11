@@ -1,12 +1,12 @@
 package config
 
 import (
-"encoding/json"
 "fmt"
 "os"
-"path/filepath"
 "sync"
 
+"github.com/jacksonopp/openwaves/internal/channelstore"
+"github.com/jacksonopp/openwaves/internal/db"
 "gopkg.in/yaml.v3"
 )
 
@@ -27,6 +27,11 @@ IngestType       string   `yaml:"ingest_type"       json:"ingest_type"`   // "ht
 IngestKey        string   `yaml:"ingest_key"        json:"ingest_key"`
 }
 
+type DatabaseConfig struct {
+Driver string `yaml:"driver"` // sqlite | postgres | mysql | mssql
+DSN    string `yaml:"dsn"`
+}
+
 type Config struct {
 Domain       string             `yaml:"domain"`
 Scheme       string             `yaml:"scheme"`       // "http" | "https"
@@ -35,15 +40,12 @@ KeysDir      string             `yaml:"keys_dir"`     // default "keys"
 Stations     []StationConfig    `yaml:"stations"`
 AdminKey     string             `yaml:"admin_key"` // if set, all /admin requests require Authorization: Bearer <AdminKey>
 Territory    string             `yaml:"territory"` // ISO 3166-1 alpha-2 code for this server's territory, e.g. "US" or "*"
+Database     DatabaseConfig     `yaml:"database"`
 
 mu              sync.RWMutex
 dynamicStations []StationConfig
-channelsFile    string
+channelStore    channelstore.Store
 staticSet       map[string]struct{}
-}
-
-type channelsFile struct {
-Stations []StationConfig `json:"stations"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -70,22 +72,46 @@ if cfg.KeysDir == "" {
 cfg.KeysDir = "keys"
 }
 
-cfg.channelsFile = filepath.Join(filepath.Dir(path), "channels.json")
+// Database defaults
+if cfg.Database.Driver == "" {
+cfg.Database.Driver = "sqlite"
+}
+if cfg.Database.DSN == "" {
+cfg.Database.DSN = "openwaves.db"
+}
+
+// Open DB and migrate channel model
+gormDB, err := db.Open(cfg.Database.Driver, cfg.Database.DSN)
+if err != nil {
+return nil, fmt.Errorf("config: failed to open database: %w", err)
+}
+if err := db.Migrate(gormDB, &channelstore.Station{}); err != nil {
+return nil, fmt.Errorf("config: failed to migrate database: %w", err)
+}
+cfg.channelStore = channelstore.New(gormDB)
 
 cfg.staticSet = make(map[string]struct{}, len(cfg.Stations))
 for _, s := range cfg.Stations {
 cfg.staticSet[s.Username] = struct{}{}
 }
 
-if raw, err := os.ReadFile(cfg.channelsFile); err == nil {
-var cf channelsFile
-if err := json.Unmarshal(raw, &cf); err != nil {
-return nil, fmt.Errorf("config: failed to parse channels.json: %w", err)
+// Load dynamic stations from DB
+stations, err := cfg.channelStore.List()
+if err != nil {
+return nil, fmt.Errorf("config: failed to load channels from database: %w", err)
 }
-cfg.dynamicStations = cf.Stations
+for _, s := range stations {
+cfg.dynamicStations = append(cfg.dynamicStations, stationFromStore(s))
 }
 
 return &cfg, nil
+}
+
+// SetChannelStore replaces the channel persistence store. Intended for tests.
+func (c *Config) SetChannelStore(s channelstore.Store) {
+c.mu.Lock()
+defer c.mu.Unlock()
+c.channelStore = s
 }
 
 // Registry returns all known stations (static + dynamic).
@@ -123,8 +149,13 @@ if d.Username == sc.Username {
 return fmt.Errorf("channel %q already exists", sc.Username)
 }
 }
+if c.channelStore != nil {
+if err := c.channelStore.Create(stationToStore(sc)); err != nil {
+return fmt.Errorf("config: failed to persist channel: %w", err)
+}
+}
 c.dynamicStations = append(c.dynamicStations, sc)
-return c.writeChannelsFileLocked()
+return nil
 }
 
 // DeleteChannel removes a dynamically-created station. Returns an error if the
@@ -145,18 +176,39 @@ break
 if idx == -1 {
 return fmt.Errorf("channel %q not found", username)
 }
+if c.channelStore != nil {
+if err := c.channelStore.Delete(username); err != nil {
+return fmt.Errorf("config: failed to remove channel from database: %w", err)
+}
+}
 c.dynamicStations = append(c.dynamicStations[:idx], c.dynamicStations[idx+1:]...)
-return c.writeChannelsFileLocked()
-}
-
-func (c *Config) writeChannelsFileLocked() error {
-data, err := json.Marshal(channelsFile{Stations: c.dynamicStations})
-if err != nil {
-return err
-}
-return os.WriteFile(c.channelsFile, data, 0644)
+return nil
 }
 
 func (c *Config) BaseURL() string {
 return fmt.Sprintf("%s://%s", c.Scheme, c.Domain)
+}
+
+func stationToStore(sc StationConfig) channelstore.Station {
+return channelstore.Station{
+Username:         sc.Username,
+Name:             sc.Name,
+Summary:          sc.Summary,
+LicenseTerritory: channelstore.StringSlice(sc.LicenseTerritory),
+RelayPolicy:      sc.RelayPolicy,
+IngestType:       sc.IngestType,
+IngestKey:        sc.IngestKey,
+}
+}
+
+func stationFromStore(s channelstore.Station) StationConfig {
+return StationConfig{
+Username:         s.Username,
+Name:             s.Name,
+Summary:          s.Summary,
+LicenseTerritory: []string(s.LicenseTerritory),
+RelayPolicy:      s.RelayPolicy,
+IngestType:       s.IngestType,
+IngestKey:        s.IngestKey,
+}
 }
