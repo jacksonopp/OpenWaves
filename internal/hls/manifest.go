@@ -31,7 +31,10 @@ func Manifest(store *Store, username, baseURL string, targetDuration int) string
 	}
 	fmt.Fprintf(&b, "#EXT-X-MEDIA-SEQUENCE:%d\n", mediaSeq)
 
-	for _, seg := range segs {
+	for i, seg := range segs {
+		if i > 0 && seg.DiscontinuitySeq != segs[i-1].DiscontinuitySeq {
+			fmt.Fprintf(&b, "#EXT-X-DISCONTINUITY\n")
+		}
 		fmt.Fprintf(&b, "#EXTINF:%.3f,\n", float64(targetDuration))
 		fmt.Fprintf(&b, "%s/%s\n", baseURL, seg.Filename)
 	}

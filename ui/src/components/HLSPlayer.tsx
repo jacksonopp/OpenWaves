@@ -23,11 +23,25 @@ export default function HLSPlayer({ src }: Props) {
       });
       hls.loadSource(src);
       hls.attachMedia(audio as unknown as HTMLMediaElement);
+
+      // Recover from fatal errors automatically so a brief gap (e.g. during
+      // an audio source switch) doesn't leave the player permanently stalled.
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data.fatal) return;
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          hls.startLoad();
+        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          hls.recoverMediaError();
+        } else {
+          hls.destroy();
+        }
+      });
+
       return () => hls.destroy();
     } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
       audio.src = src;
     }
   }, [src]);
 
-  return <audio ref={audioRef} controls style={{ width: '100%', marginTop: '0.5rem' }} />;
+  return <audio ref={audioRef} controls autoPlay style={{ width: '100%', marginTop: '0.5rem' }} />;
 }

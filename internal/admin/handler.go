@@ -46,6 +46,7 @@ func Handler(cfg *config.Config, store *hls.Store, followerStore *inbox.Follower
 	r.HandleFunc("/admin/stations/{username}/ingest/stop", stopIngestHandler(cfg, bcMgr)).Methods(http.MethodPost)
 	r.HandleFunc("/admin/stations/{username}/ingest/input", setAudioInputHandler(cfg, store, bcMgr)).Methods(http.MethodPost)
 	r.HandleFunc("/admin/stations/{username}/hls/clear", clearSegmentsHandler(cfg, store)).Methods(http.MethodPost)
+	r.HandleFunc("/admin/stations/{username}/hls/discontinuity", markDiscontinuityHandler(cfg, store)).Methods(http.MethodPost)
 	r.HandleFunc("/admin/channels", createChannelHandler(cfg, ks, bcMgr)).Methods(http.MethodPost)
 	r.HandleFunc("/admin/channels/{username}", deleteChannelHandler(cfg)).Methods(http.MethodDelete)
 	r.HandleFunc("/admin/logs", stream.Handler()).Methods(http.MethodGet)
@@ -359,15 +360,32 @@ func setAudioInputHandler(cfg *config.Config, store *hls.Store, bcMgr *broadcast
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		// Flush stale segments so the HLS player rejoins at the new live edge.
-		store.Clear(username)
+		// Mark a discontinuity so HLS clients resync when new segments arrive.
+		// Do NOT clear the store — clients need the buffered segments to keep
+		// playing while FFmpeg restarts.
+		store.MarkDiscontinuity(username)
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// markDiscontinuityHandler increments the HLS discontinuity version for a station.
+// External broadcasters (e.g. the TUI) call this when changing audio source so
+// that HLS clients see an #EXT-X-DISCONTINUITY tag and resync at the live edge.
+func markDiscontinuityHandler(cfg *config.Config, store *hls.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		username := mux.Vars(r)["username"]
+		if _, ok := cfg.Registry()[username]; !ok {
+			http.Error(w, "station not found", http.StatusNotFound)
+			return
+		}
+		store.MarkDiscontinuity(username)
 		w.WriteHeader(http.StatusOK)
 	}
 }
 
 // clearSegmentsHandler flushes the HLS segment buffer for a station.
-// Used by external broadcasters (e.g. the TUI) when changing audio source
-// so that HLS clients can resync to the new live edge.
+// Kept for admin use-cases where a hard reset of buffered content is needed
+// (e.g. after a stream stop/start cycle).
 func clearSegmentsHandler(cfg *config.Config, store *hls.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		username := mux.Vars(r)["username"]

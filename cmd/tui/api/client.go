@@ -137,9 +137,20 @@ func (c *Client) StopRelay(username string) error {
 }
 
 // ClearSegments flushes the server-side HLS segment buffer for a station.
-// Call this before starting a new local broadcast so HLS clients resync.
 func (c *Client) ClearSegments(username string) error {
 	resp, err := c.do(http.MethodPost, "/admin/stations/"+username+"/hls/clear", nil)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
+// MarkDiscontinuity signals the server that the audio source changed for a station.
+// The server inserts an #EXT-X-DISCONTINUITY tag between old and new segments so
+// HLS clients resync without an empty-manifest stall.
+func (c *Client) MarkDiscontinuity(username string) error {
+	resp, err := c.do(http.MethodPost, "/admin/stations/"+username+"/hls/discontinuity", nil)
 	if err != nil {
 		return err
 	}

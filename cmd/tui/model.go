@@ -321,14 +321,15 @@ func doStopRelay(client *api.Client, username string) tea.Cmd {
 	}
 }
 
-// doChangeInput stops any existing local broadcast for the station, clears
-// the server-side HLS segment buffer, then starts a new broadcast with the
-// given audioInput. This forces HLS clients to resync to the new live edge.
+// doChangeInput stops any existing local broadcast for the station, marks a
+// discontinuity in the server-side HLS store (so HLS clients resync via the
+// #EXT-X-DISCONTINUITY tag without an empty-manifest stall), then starts a new
+// broadcast with the given audioInput.
 func doChangeInput(client *api.Client, runner *broadcast.Runner, station, serverURL, audioInput string) tea.Cmd {
 	return func() tea.Msg {
 		runner.Stop(station)
-		// Best-effort: clear server-side segments so HLS clients resync.
-		_ = client.ClearSegments(station)
+		// Mark discontinuity so old segments stay buffered while FFmpeg restarts.
+		_ = client.MarkDiscontinuity(station)
 		if err := runner.Start(station, serverURL, audioInput); err != nil {
 			return errMsg(err)
 		}

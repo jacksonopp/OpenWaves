@@ -10,38 +10,43 @@ const liveTimeout = 20 * time.Second
 
 // Segment is a single HLS transport-stream chunk with metadata.
 type Segment struct {
-	Filename  string
-	Data      []byte
-	Signature []byte
-	SeqNum    int
+	Filename        string
+	Data            []byte
+	Signature       []byte
+	SeqNum          int
+	DiscontinuitySeq int // incremented when audio source changes; used to emit #EXT-X-DISCONTINUITY
 }
 
 // Store is a thread-safe in-memory ring buffer of HLS segments per station.
 type Store struct {
-	mu          sync.RWMutex
-	maxSegments int
-	segments    map[string][]Segment
-	lastAdded   map[string]time.Time
-	listeners   map[string]map[string]time.Time // station → IP → last manifest fetch
-	suspended   map[string]bool
+	mu           sync.RWMutex
+	maxSegments  int
+	segments     map[string][]Segment
+	lastAdded    map[string]time.Time
+	listeners    map[string]map[string]time.Time // station → IP → last manifest fetch
+	suspended    map[string]bool
+	discontinuity map[string]int // per-station version counter; incremented on source change
 }
 
 // NewStore creates a Store that retains at most maxSegments per station.
 func NewStore(maxSegments int) *Store {
 	return &Store{
-		maxSegments: maxSegments,
-		segments:    make(map[string][]Segment),
-		lastAdded:   make(map[string]time.Time),
-		listeners:   make(map[string]map[string]time.Time),
-		suspended:   make(map[string]bool),
+		maxSegments:  maxSegments,
+		segments:     make(map[string][]Segment),
+		lastAdded:    make(map[string]time.Time),
+		listeners:    make(map[string]map[string]time.Time),
+		suspended:    make(map[string]bool),
+		discontinuity: make(map[string]int),
 	}
 }
 
 // Add appends a segment for the given station, evicting the oldest if at capacity.
+// The segment is stamped with the current discontinuity version for the station.
 func (s *Store) Add(username string, seg Segment) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	seg.DiscontinuitySeq = s.discontinuity[username]
 	segs := s.segments[username]
 	if len(segs) == s.maxSegments {
 		segs = segs[1:]
@@ -92,6 +97,15 @@ func (s *Store) Clear(username string) {
 
 	delete(s.segments, username)
 	delete(s.lastAdded, username)
+}
+
+// MarkDiscontinuity increments the discontinuity version for a station.
+// Subsequent segments will carry the new version; the manifest will emit
+// #EXT-X-DISCONTINUITY between the old and new segments so HLS clients resync.
+func (s *Store) MarkDiscontinuity(username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.discontinuity[username]++
 }
 
 // Suspend blocks new ingest for a station and clears its segments.

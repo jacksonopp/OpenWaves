@@ -65,7 +65,6 @@ export default function StreamCard({ station, client, onMutate, onDelete }: Prop
   const [audioFile, setAudioFile] = useState(station.audioInput?.file ?? '');
   const [audioInputType, setAudioInputType] = useState<AudioInputType>(station.audioInput?.type ?? 'silence');
   const [settingsMsg, setSettingsMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
-  const [playerKey, setPlayerKey] = useState(0);
 
   useEffect(() => {
     if (!showSettings) return;
@@ -115,7 +114,7 @@ export default function StreamCard({ station, client, onMutate, onDelete }: Prop
       type: audioInputType,
       file: audioInputType === 'file' ? audioFile : undefined,
     }),
-    onSuccess: () => { setSettingsMsg({ type: 'success', text: 'Audio input updated.' }); setPlayerKey(k => k + 1); onMutate(); },
+    onSuccess: () => { setSettingsMsg({ type: 'success', text: 'Audio input updated.' }); onMutate(); },
     onError: (e: Error) => setSettingsMsg({ type: 'error', text: e.message }),
   });
 
@@ -203,7 +202,7 @@ export default function StreamCard({ station, client, onMutate, onDelete }: Prop
       {/* Monitor section */}
       {showMonitor && (
         <div className={styles.sectionMonitor}>
-          <HLSPlayer key={playerKey} src={hlsSrc} />
+          <HLSPlayer src={hlsSrc} />
         </div>
       )}
 
