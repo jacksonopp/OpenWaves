@@ -322,3 +322,9 @@
   color: #059669;
   margin: 0;
 }
+
+.audioInputLabel {
+  font-size: 12px;
+  color: #717182;
+  margin-top: 4px;
+}

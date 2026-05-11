@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jacksonopp/openwaves/internal/hls"
+	"github.com/jacksonopp/openwaves/internal/keystore"
 )
 
 func generateTestKey(t *testing.T) *rsa.PrivateKey {
@@ -44,10 +45,21 @@ func signData(t *testing.T, key *rsa.PrivateKey, data []byte) []byte {
 	return sig
 }
 
+// newTestStore creates a keystore.Store with keys generated for each username.
+func newTestStore(t *testing.T, usernames ...string) *keystore.Store {
+	t.Helper()
+	ks := keystore.NewStore(t.TempDir())
+	for _, u := range usernames {
+		if err := ks.Load(u); err != nil {
+			t.Fatalf("keystore.Load(%q): %v", u, err)
+		}
+	}
+	return ks
+}
+
 func TestManager_StartStop(t *testing.T) {
 	store := hls.NewStore(10)
-	key := generateTestKey(t)
-	mgr := NewManager(store, map[string]*rsa.PrivateKey{"alice": key})
+	mgr := NewManager(store, newTestStore(t, "alice"))
 
 	// Use a no-op server so the session doesn't error on network calls
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +114,7 @@ func TestPoller_FetchesSegments(t *testing.T) {
 	defer srv.Close()
 
 	store := hls.NewStore(10)
-	mgr := NewManager(store, map[string]*rsa.PrivateKey{"bob": key})
+	mgr := NewManager(store, newTestStore(t, "bob"))
 
 	if err := mgr.StartRelay("bob", srv.URL, srv.URL+"/stations/bob"); err != nil {
 		t.Fatalf("StartRelay: %v", err)
@@ -126,8 +138,7 @@ func TestPoller_FetchesSegments(t *testing.T) {
 
 func TestManager_StartRelay_ReplacesExisting(t *testing.T) {
 	store := hls.NewStore(10)
-	key := generateTestKey(t)
-	mgr := NewManager(store, map[string]*rsa.PrivateKey{"carol": key})
+	mgr := NewManager(store, newTestStore(t, "carol"))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

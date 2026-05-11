@@ -8,7 +8,52 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
+
+// Store caches RSA key pairs for stations, loading or generating them on demand.
+type Store struct {
+	keysDir  string
+	mu       sync.RWMutex
+	privKeys map[string]*rsa.PrivateKey
+	pubPEMs  map[string]string
+}
+
+// NewStore returns an empty Store backed by keysDir.
+func NewStore(keysDir string) *Store {
+	return &Store{
+		keysDir:  keysDir,
+		privKeys: make(map[string]*rsa.PrivateKey),
+		pubPEMs:  make(map[string]string),
+	}
+}
+
+// Load loads or generates an RSA key pair for username, caching the result.
+func (s *Store) Load(username string) error {
+	priv, pub, err := LoadOrGenerate(username, s.keysDir)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.privKeys[username] = priv
+	s.pubPEMs[username] = pub
+	s.mu.Unlock()
+	return nil
+}
+
+// PrivateKey returns the cached RSA private key for username, or nil if not loaded.
+func (s *Store) PrivateKey(username string) *rsa.PrivateKey {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.privKeys[username]
+}
+
+// PublicKeyPEM returns the cached PEM-encoded public key for username, or "" if not loaded.
+func (s *Store) PublicKeyPEM(username string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.pubPEMs[username]
+}
 
 // LoadOrGenerate loads an existing RSA key pair for the given username from keysDir,
 // or generates a new RSA-2048 key pair and writes it to disk if either file is missing.

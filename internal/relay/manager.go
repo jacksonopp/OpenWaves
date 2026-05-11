@@ -1,10 +1,10 @@
 package relay
 
 import (
-	"crypto/rsa"
 	"sync"
 
 	"github.com/jacksonopp/openwaves/internal/hls"
+	"github.com/jacksonopp/openwaves/internal/keystore"
 )
 
 // Manager manages relay sessions for all local stations.
@@ -13,14 +13,14 @@ type Manager struct {
 	mu       sync.Mutex
 	sessions map[string]*Session // key: local station username
 	store    *hls.Store
-	privKeys map[string]*rsa.PrivateKey
+	ks       *keystore.Store
 }
 
-func NewManager(store *hls.Store, privKeys map[string]*rsa.PrivateKey) *Manager {
+func NewManager(store *hls.Store, ks *keystore.Store) *Manager {
 	return &Manager{
 		sessions: make(map[string]*Session),
 		store:    store,
-		privKeys: privKeys,
+		ks:       ks,
 	}
 }
 
@@ -37,7 +37,8 @@ func (m *Manager) StartRelay(username, sourceURL, selfURL string) error {
 		delete(m.sessions, username)
 	}
 
-	s := newSession(username, sourceURL, selfURL, m.store, m.privKeys[username])
+	priv := m.ks.PrivateKey(username)
+	s := newSession(username, sourceURL, selfURL, m.store, priv)
 	s.start()
 	m.sessions[username] = s
 	return nil

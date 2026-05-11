@@ -308,7 +308,7 @@ The avatar displays the user's initials (e.g., `AM` for "Admin"). Long names and
 
 ### 5.6 Buttons
 
-**Primary** — used for the main page action (e.g., "Start New Stream"):
+**Primary** — used for the main page action (e.g., "Create New Channel"):
 
 ```css
 .btnPrimary {
@@ -403,7 +403,7 @@ Cards are used for stream entries, stat summaries, and other grouped content.
 }
 ```
 
-**Stream card layout** — content (stream name, status badge, author, listener count, uptime) is left-aligned; action buttons (Monitor, Stop) are right-aligned via `justify-content: space-between`.
+**Stream card layout** — content (stream name, status badge, author, listener count, uptime, current audio input) is left-aligned; action buttons (Start Stream / Monitor, Stop) are right-aligned via `justify-content: space-between`. Dynamic channels (not defined in `config.yaml`) show a delete button in the settings panel. The settings panel contains three sections: **Audio Input** (silence / test tone / file selector), **Stream** (start/stop stream), and **Relay** (relay controls).
 
 **Stat card** (Overview page) uses a tighter `padding: 20px` and stacks a large stat number (`32px bold`) above a small label (`14px muted`):
 

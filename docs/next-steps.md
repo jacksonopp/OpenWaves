@@ -14,7 +14,15 @@ This document outlines the planned work after completing the core protocol imple
 - `OverviewPage` — station stats + live log feed
 - Light theme with indigo accent (`#6366f1`) per Figma design
 
-See `internal/adminui/`, `internal/broadcaster/`, and `ui/` for the implementation, and `docs/get-started.md § 6` for the full build and dev workflow.
+**Dynamic channels + audio input** were also added (see `docs/get-started.md § 5` for the full API):
+
+- Channels can be created/deleted at runtime via `POST/DELETE /admin/channels` — no `config.yaml` edit required; persisted in `channels.json`
+- `stream/start` now auto-starts ingest (defaulting to silence); `stream/stop` auto-stops ingest before terminating
+- `StationStatus` includes `audioInput` and `isStatic` fields
+- `CreateChannelModal` in the UI replaces `StartStreamModal`; `StreamCard` has an audio input selector (Silence / Test Tone / File) and a delete button for dynamic channels
+- `keystore.Store` (thread-safe) replaces the raw `map[string]*rsa.PrivateKey` throughout the server
+
+See `internal/adminui/`, `internal/broadcaster/`, `internal/config/`, `internal/keystore/`, and `ui/` for the implementation.
 
 ---
 

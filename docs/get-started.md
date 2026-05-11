@@ -218,17 +218,73 @@ All require `Authorization: Bearer <admin_key>`.
 |---|---|---|
 | `GET` | `/admin/stations` | List all stations with live/relay/ingest status |
 | `GET` | `/admin/stations/{username}` | Single station status |
-| `POST` | `/admin/stations/{username}/stream/stop` | Suspend ingest + propagate TerminateStream to relay followers |
-| `POST` | `/admin/stations/{username}/stream/start` | Resume ingest (re-enable after stop, ready for fresh broadcast) |
+| `POST` | `/admin/stations/{username}/stream/stop` | Stop ingest + propagate TerminateStream to relay followers |
+| `POST` | `/admin/stations/{username}/stream/start` | Start stream: resumes ingest + auto-starts broadcast (silence by default) |
 | `POST` | `/admin/stations/{username}/relay/start` | Start relay (body: `{"source_url":"..."}`) |
 | `POST` | `/admin/stations/{username}/relay/stop` | Stop relay |
-| `POST` | `/admin/stations/{username}/ingest/start` | Spawn `broadcast.sh` subprocess on the server (body: `{"audio_file":""}`) |
+| `POST` | `/admin/stations/{username}/ingest/start` | Spawn `broadcast.sh` subprocess (body: `{"audio_type":"silence\|test_tone\|file","audio_file":""}`) |
 | `POST` | `/admin/stations/{username}/ingest/stop` | Kill the managed broadcast subprocess |
+| `POST` | `/admin/stations/{username}/ingest/input` | Hot-swap audio input while live (body: `{"type":"silence\|test_tone\|file","file":""}`) |
+| `POST` | `/admin/channels` | Create a new dynamic channel (body: `StationConfig`) |
+| `DELETE` | `/admin/channels/{username}` | Delete a dynamic channel (error if static) |
 | `GET` | `/admin/logs` | SSE stream of server log lines (`text/event-stream`) |
 
-Station status response:
+Station status response now includes `audioInput` and `isStatic`:
 ```json
-{"username":"morning-vibes","isLive":true,"segmentCount":8,"listenerCount":3,"isRelaying":false,"isIngesting":true}
+{
+  "username": "morning-vibes",
+  "isLive": true,
+  "segmentCount": 8,
+  "listenerCount": 3,
+  "isRelaying": false,
+  "isIngesting": true,
+  "audioInput": {"type": "silence"},
+  "isStatic": true
+}
+```
+
+### Dynamic channels
+
+Channels can be created and deleted at runtime without editing `config.yaml`. Dynamic channels are persisted to `channels.json` (sibling to `config.yaml`) and survive server restarts.
+
+```bash
+# Create a new channel
+curl -X POST http://localhost:8080/admin/channels \
+  -H "Authorization: Bearer secret" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"jazz-hour","name":"Jazz Hour","relay_policy":"open","license_territory":["*"]}'
+
+# Delete a dynamic channel
+curl -X DELETE http://localhost:8080/admin/channels/jazz-hour \
+  -H "Authorization: Bearer secret"
+```
+
+- Static channels (defined in `config.yaml`) cannot be deleted via the API
+- RSA keys are generated automatically for new dynamic channels
+- `GET /admin/stations` includes both static and dynamic channels
+
+### Audio input
+
+Each station has a configurable audio source, hot-swappable while live:
+
+| Type | FFmpeg source | Notes |
+|---|---|---|
+| `silence` | `anullsrc` stereo/44100 | Default for all new streams |
+| `test_tone` | `sine=frequency=440` | 440 Hz test tone |
+| `file` | `stream_loop -1 -i <path>` | Loops a local audio file indefinitely |
+
+```bash
+# Switch to a looping file while broadcasting
+curl -X POST http://localhost:8080/admin/stations/morning-vibes/ingest/input \
+  -H "Authorization: Bearer secret" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"file","file":"/path/to/audio.mp3"}'
+
+# Switch back to silence
+curl -X POST http://localhost:8080/admin/stations/morning-vibes/ingest/input \
+  -H "Authorization: Bearer secret" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"silence"}'
 ```
 
 Config: add `admin_key` and `territory` to `config.yaml`:
@@ -311,15 +367,16 @@ A browser-based admin UI embedded directly in the Go binary, providing a full st
   - `handler.go` — `Handler() http.Handler`: in production, strips the `/admin/ui` prefix and serves from the embedded `dist/`, with an SPA fallback (returns `index.html` for directories and missing files to avoid `http.FileServer`'s redirect behavior); in dev mode, reverse-proxies to the URL in `ADMINUI_DEV_PROXY`
 
 - **`internal/broadcaster/manager.go`** — Per-station subprocess manager for `bin/broadcast.sh`
-  - `NewManager()`, `Start(username, serverURL, audioFile string) error`, `Stop(username string)`, `IsRunning(username string) bool`
-  - Spawns `./bin/broadcast.sh` (overridable via `BROADCAST_SCRIPT` env var)
-  - `AUDIO_INPUT` env var overrides FFmpeg audio input (format: `-stream_loop -1 -i /path/to/file.mp3`); empty = test tone
+  - `NewManager()`, `Start(username, serverURL string) error`, `Stop(username string) error`, `IsRunning(username string) bool`
+  - `AudioInput{Type, File}` struct — `type` is `"silence"`, `"test_tone"`, or `"file"`. Default is `silence`.
+  - `SetInput(username, AudioInput)` — stores without restarting; `GetInput(username) AudioInput`; `ChangeInput(username, AudioInput) error` — hot-swaps while live
+  - `AUDIO_INPUT` env var passed to `bin/broadcast.sh` with the resolved FFmpeg flags
   - Process group management with SIGINT + SIGKILL fallback on stop
 
 ### Modified files
 
-- **`internal/admin/handler.go`** — accepts `*broadcaster.Manager`; implements three new endpoints (`ingest/start`, `ingest/stop`, `GET /admin/logs`); `StationStatus` now includes `"isIngesting": bool`
-- **`cmd/server/main.go`** — creates `bcMgr := broadcaster.NewManager()`, mounts `router.PathPrefix("/admin/ui").Handler(adminui.Handler())` **before** the `/admin` sub-router so SPA assets are served without the auth middleware
+- **`internal/admin/handler.go`** — accepts `*broadcaster.Manager` and `*keystore.Store`; implements all admin endpoints; `StationStatus` now includes `"isIngesting": bool`, `"audioInput": AudioInput`, `"isStatic": bool`; `stream/start` auto-starts ingest (silence); `stream/stop` stops ingest before terminating
+- **`cmd/server/main.go`** — creates `ks := keystore.NewStore(cfg.KeysDir)`, loads static channel keys at startup, passes `ks` to `relay.NewManager`, `ingest.Handler`, `admin.Handler`, and `stationHandler`; removes the old `loadKeys` raw-map approach
 
 ### Frontend (ui/)
 
@@ -343,7 +400,8 @@ The SPA lives in `ui/` and is built independently before embedding.
 | `ui/src/components/admin/TopBar.tsx` | Brand, Client/Admin toggle tabs, "Federated via ActivityPub" |
 | `ui/src/components/admin/Sidebar.tsx` | Nav items (Overview, Streams, Moderation, Federation) + user profile footer |
 | `ui/src/components/admin/StreamCard.tsx` | Per-station card: LIVE/OFFLINE badge, listener count, inline HLS player (Monitor), relay/ingest controls (Settings) |
-| `ui/src/components/admin/StartStreamModal.tsx` | Modal for selecting a station and starting ingest |
+| `ui/src/components/admin/StreamCard.tsx` | Per-station card: LIVE/OFFLINE badge, listener count, inline HLS player (Monitor), relay/ingest settings, audio input selector, delete button for dynamic channels |
+| `ui/src/components/admin/CreateChannelModal.tsx` | Modal for creating a new dynamic channel (username, display name, summary, relay policy, territory) |
 | `ui/src/components/HLSPlayer.tsx` | hls.js audio player configured for live streaming |
 | `ui/src/components/LogFeed.tsx` | Connects to `GET /admin/logs` SSE stream and displays log lines |
 

@@ -14,33 +14,39 @@ import (
 	"github.com/jacksonopp/openwaves/internal/config"
 	"github.com/jacksonopp/openwaves/internal/hls"
 	"github.com/jacksonopp/openwaves/internal/inbox"
+	"github.com/jacksonopp/openwaves/internal/keystore"
 	"github.com/jacksonopp/openwaves/internal/logstream"
 	"github.com/jacksonopp/openwaves/internal/relay"
 )
 
 // StationStatus is the JSON response type for admin station info.
 type StationStatus struct {
-	Username      string `json:"username"`
-	IsLive        bool   `json:"isLive"`
-	SegmentCount  int    `json:"segmentCount"`
-	ListenerCount int    `json:"listenerCount"`
-	IsRelaying    bool   `json:"isRelaying"`
-	IsIngesting   bool   `json:"isIngesting"`
+	Username      string               `json:"username"`
+	IsLive        bool                 `json:"isLive"`
+	SegmentCount  int                  `json:"segmentCount"`
+	ListenerCount int                  `json:"listenerCount"`
+	IsRelaying    bool                 `json:"isRelaying"`
+	IsIngesting   bool                 `json:"isIngesting"`
+	AudioInput    broadcaster.AudioInput `json:"audioInput"`
+	IsStatic      bool                 `json:"isStatic"`
 }
 
 // Handler returns an http.Handler (gorilla/mux sub-router) for all /admin/* routes.
 // Mount it at /admin in the main router.
-func Handler(cfg *config.Config, store *hls.Store, followerStore *inbox.FollowerStore, relayMgr *relay.Manager, stream *logstream.Stream, bcMgr *broadcaster.Manager) http.Handler {
+func Handler(cfg *config.Config, store *hls.Store, followerStore *inbox.FollowerStore, relayMgr *relay.Manager, stream *logstream.Stream, bcMgr *broadcaster.Manager, ks *keystore.Store) http.Handler {
 	r := mux.NewRouter()
 	r.Use(authMiddleware(cfg.AdminKey))
 	r.HandleFunc("/admin/stations", listStationsHandler(cfg, store, relayMgr, bcMgr)).Methods(http.MethodGet)
 	r.HandleFunc("/admin/stations/{username}", getStationHandler(cfg, store, relayMgr, bcMgr)).Methods(http.MethodGet)
-	r.HandleFunc("/admin/stations/{username}/stream/stop", stopStreamHandler(cfg, store, followerStore, relayMgr)).Methods(http.MethodPost)
-	r.HandleFunc("/admin/stations/{username}/stream/start", startStreamHandler(cfg, store)).Methods(http.MethodPost)
+	r.HandleFunc("/admin/stations/{username}/stream/stop", stopStreamHandler(cfg, store, followerStore, relayMgr, bcMgr)).Methods(http.MethodPost)
+	r.HandleFunc("/admin/stations/{username}/stream/start", startStreamHandler(cfg, store, bcMgr)).Methods(http.MethodPost)
 	r.HandleFunc("/admin/stations/{username}/relay/start", startRelayHandler(cfg, relayMgr)).Methods(http.MethodPost)
 	r.HandleFunc("/admin/stations/{username}/relay/stop", stopRelayHandler(cfg, relayMgr)).Methods(http.MethodPost)
 	r.HandleFunc("/admin/stations/{username}/ingest/start", startIngestHandler(cfg, bcMgr)).Methods(http.MethodPost)
 	r.HandleFunc("/admin/stations/{username}/ingest/stop", stopIngestHandler(cfg, bcMgr)).Methods(http.MethodPost)
+	r.HandleFunc("/admin/stations/{username}/ingest/input", setAudioInputHandler(cfg, bcMgr)).Methods(http.MethodPost)
+	r.HandleFunc("/admin/channels", createChannelHandler(cfg, ks, bcMgr)).Methods(http.MethodPost)
+	r.HandleFunc("/admin/channels/{username}", deleteChannelHandler(cfg)).Methods(http.MethodDelete)
 	r.HandleFunc("/admin/logs", stream.Handler()).Methods(http.MethodGet)
 	return r
 }
@@ -62,7 +68,7 @@ func authMiddleware(adminKey string) mux.MiddlewareFunc {
 	}
 }
 
-func stationStatus(username string, store *hls.Store, relayMgr *relay.Manager, bcMgr *broadcaster.Manager) StationStatus {
+func stationStatus(username string, cfg *config.Config, store *hls.Store, relayMgr *relay.Manager, bcMgr *broadcaster.Manager) StationStatus {
 	segs := store.Segments(username)
 	return StationStatus{
 		Username:      username,
@@ -71,6 +77,8 @@ func stationStatus(username string, store *hls.Store, relayMgr *relay.Manager, b
 		ListenerCount: store.ListenerCount(username),
 		IsRelaying:    relayMgr.IsRelaying(username),
 		IsIngesting:   bcMgr.IsRunning(username),
+		AudioInput:    bcMgr.GetInput(username),
+		IsStatic:      cfg.IsStatic(username),
 	}
 }
 
@@ -79,7 +87,7 @@ func listStationsHandler(cfg *config.Config, store *hls.Store, relayMgr *relay.M
 		registry := cfg.Registry()
 		statuses := make([]StationStatus, 0, len(registry))
 		for username := range registry {
-			statuses = append(statuses, stationStatus(username, store, relayMgr, bcMgr))
+			statuses = append(statuses, stationStatus(username, cfg, store, relayMgr, bcMgr))
 		}
 		sort.Slice(statuses, func(i, j int) bool {
 			return statuses[i].Username < statuses[j].Username
@@ -98,11 +106,11 @@ func getStationHandler(cfg *config.Config, store *hls.Store, relayMgr *relay.Man
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(stationStatus(username, store, relayMgr, bcMgr))
+		json.NewEncoder(w).Encode(stationStatus(username, cfg, store, relayMgr, bcMgr))
 	}
 }
 
-func stopStreamHandler(cfg *config.Config, store *hls.Store, followerStore *inbox.FollowerStore, relayMgr *relay.Manager) http.HandlerFunc {
+func stopStreamHandler(cfg *config.Config, store *hls.Store, followerStore *inbox.FollowerStore, relayMgr *relay.Manager, bcMgr *broadcaster.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		username := mux.Vars(r)["username"]
 		registry := cfg.Registry()
@@ -110,6 +118,7 @@ func stopStreamHandler(cfg *config.Config, store *hls.Store, followerStore *inbo
 			http.Error(w, "station not found", http.StatusNotFound)
 			return
 		}
+		bcMgr.Stop(username) //nolint:errcheck — non-fatal if not running
 		inbox.TerminateStation(username, store, followerStore, nil)
 		relayMgr.StopRelay(username)
 		log.Printf("admin: stopped stream for station %s", username)
@@ -117,7 +126,7 @@ func stopStreamHandler(cfg *config.Config, store *hls.Store, followerStore *inbo
 	}
 }
 
-func startStreamHandler(cfg *config.Config, store *hls.Store) http.HandlerFunc {
+func startStreamHandler(cfg *config.Config, store *hls.Store, bcMgr *broadcaster.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		username := mux.Vars(r)["username"]
 		registry := cfg.Registry()
@@ -128,6 +137,12 @@ func startStreamHandler(cfg *config.Config, store *hls.Store) http.HandlerFunc {
 		store.Resume(username)
 		store.Clear(username)
 		log.Printf("admin: cleared store for station %s (ready for ingest)", username)
+		if !bcMgr.IsRunning(username) {
+			if err := bcMgr.Start(username, cfg.BaseURL()); err != nil {
+				log.Printf("admin: failed to start ingest for %s: %v", username, err)
+				// non-fatal: stream is resumed, just no audio yet
+			}
+		}
 		w.WriteHeader(http.StatusOK)
 	}
 }
@@ -239,11 +254,18 @@ func startIngestHandler(cfg *config.Config, bcMgr *broadcaster.Manager) http.Han
 
 		var body struct {
 			AudioFile string `json:"audio_file"`
+			AudioType string `json:"audio_type"` // "silence" | "test_tone" | "file"
 		}
 		// Body is optional — ignore decode errors.
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
 
-		if err := bcMgr.Start(username, cfg.BaseURL(), body.AudioFile); err != nil {
+		if body.AudioFile != "" {
+			bcMgr.SetInput(username, broadcaster.AudioInput{Type: broadcaster.AudioFile, File: body.AudioFile})
+		} else if body.AudioType != "" {
+			bcMgr.SetInput(username, broadcaster.AudioInput{Type: broadcaster.AudioInputType(body.AudioType)})
+		}
+
+		if err := bcMgr.Start(username, cfg.BaseURL()); err != nil {
 			log.Printf("admin: failed to start ingest for %s: %v", username, err)
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
@@ -268,6 +290,74 @@ func stopIngestHandler(cfg *config.Config, bcMgr *broadcaster.Manager) http.Hand
 			return
 		}
 		log.Printf("admin: stopped ingest for station %s", username)
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func createChannelHandler(cfg *config.Config, ks *keystore.Store, bcMgr *broadcaster.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body config.StationConfig
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		if body.Username == "" {
+			http.Error(w, "username required", http.StatusBadRequest)
+			return
+		}
+		for _, ch := range body.Username {
+			if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-') {
+				http.Error(w, "username may only contain lowercase letters, digits, and hyphens", http.StatusBadRequest)
+				return
+			}
+		}
+		if err := cfg.CreateChannel(body); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		if err := ks.Load(body.Username); err != nil {
+			cfg.DeleteChannel(body.Username) //nolint:errcheck — rollback
+			http.Error(w, "failed to generate keys: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(StationStatus{
+			Username:   body.Username,
+			IsStatic:   false,
+			AudioInput: bcMgr.GetInput(body.Username),
+		})
+	}
+}
+
+func deleteChannelHandler(cfg *config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		username := mux.Vars(r)["username"]
+		if err := cfg.DeleteChannel(username); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func setAudioInputHandler(cfg *config.Config, bcMgr *broadcaster.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		username := mux.Vars(r)["username"]
+		registry := cfg.Registry()
+		if _, ok := registry[username]; !ok {
+			http.Error(w, "station not found", http.StatusNotFound)
+			return
+		}
+		var input broadcaster.AudioInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		if err := bcMgr.ChangeInput(username, input); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	}
 }

@@ -1,7 +1,6 @@
 package ingest
 
 import (
-"crypto/rsa"
 "io"
 "log"
 "net/http"
@@ -11,13 +10,14 @@ import (
 "github.com/gorilla/mux"
 "github.com/jacksonopp/openwaves/internal/config"
 "github.com/jacksonopp/openwaves/internal/hls"
+"github.com/jacksonopp/openwaves/internal/keystore"
 )
 
 // Handler returns an http.HandlerFunc for POST /stations/{username}/ingest/{filename}.
 // The request body must be the raw bytes of a single .ts HLS segment.
 // The server signs the segment and adds it to the store.
-func Handler(cfg *config.Config, store *hls.Store, privKeys map[string]*rsa.PrivateKey) http.HandlerFunc {
-ingestor := NewSegmentIngestor(store, privKeys)
+func Handler(cfg *config.Config, store *hls.Store, ks *keystore.Store) http.HandlerFunc {
+ingestor := NewSegmentIngestor(store, ks)
 return func(w http.ResponseWriter, r *http.Request) {
 username := mux.Vars(r)["username"]
 filename := mux.Vars(r)["filename"]
@@ -27,7 +27,7 @@ if _, ok := registry[username]; !ok && cfg.Registration == config.AdminOnly {
 http.NotFound(w, r)
 return
 }
-if _, ok := privKeys[username]; !ok {
+if ks.PrivateKey(username) == nil {
 http.Error(w, "no key for station", http.StatusInternalServerError)
 return
 }

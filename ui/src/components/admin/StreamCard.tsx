@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { type StationStatus, type AdminClient } from '../../api/client';
+import { type StationStatus, type AdminClient, type AudioInputType } from '../../api/client';
 import HLSPlayer from '../HLSPlayer';
 import styles from './StreamCard.module.css';
 
@@ -8,6 +8,18 @@ interface Props {
   station: StationStatus;
   client: AdminClient;
   onMutate: () => void;
+  onDelete?: () => void;
+}
+
+function TrashIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14H6L5 6" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M9 6V4h6v2" />
+    </svg>
+  );
 }
 
 function ListenerIcon() {
@@ -46,20 +58,35 @@ function MonitorIcon() {
   );
 }
 
-export default function StreamCard({ station, client, onMutate }: Props) {
+export default function StreamCard({ station, client, onMutate, onDelete }: Props) {
   const [showMonitor, setShowMonitor] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [relayURL, setRelayURL] = useState('');
-  const [audioFile, setAudioFile] = useState('');
+  const [audioFile, setAudioFile] = useState(station.audioInput?.file ?? '');
+  const [audioInputType, setAudioInputType] = useState<AudioInputType>(station.audioInput?.type ?? 'silence');
   const [settingsMsg, setSettingsMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
 
+  useEffect(() => {
+    if (!showSettings) return;
+    setAudioInputType(station.audioInput?.type ?? 'silence');
+    setAudioFile(station.audioInput?.file ?? '');
+  }, [station.audioInput]);
+
   const stopMutation = useMutation({
-    mutationFn: () => client.stopStream(station.username),
+    mutationFn: async () => {
+      if (station.isIngesting) await client.stopIngest(station.username).catch(() => {});
+      await client.stopStream(station.username);
+    },
     onSuccess: onMutate,
   });
 
-  const startRelayMutation = useMutation({
-    mutationFn: () => client.startRelay(station.username, relayURL),
+  const startStreamMutation = useMutation({
+    mutationFn: () => client.startStream(station.username),
+    onSuccess: () => { setSettingsMsg({ type: 'success', text: 'Stream ready.' }); onMutate(); },
+    onError: (e: Error) => setSettingsMsg({ type: 'error', text: e.message }),
+  });
+
+  const startRelayMutation = useMutation({    mutationFn: () => client.startRelay(station.username, relayURL),
     onSuccess: () => { setSettingsMsg({ type: 'success', text: 'Relay started.' }); onMutate(); },
     onError: (e: Error) => setSettingsMsg({ type: 'error', text: e.message }),
   });
@@ -79,6 +106,15 @@ export default function StreamCard({ station, client, onMutate }: Props) {
   const stopIngestMutation = useMutation({
     mutationFn: () => client.stopIngest(station.username),
     onSuccess: () => { setSettingsMsg({ type: 'success', text: 'Ingest stopped.' }); onMutate(); },
+    onError: (e: Error) => setSettingsMsg({ type: 'error', text: e.message }),
+  });
+
+  const setAudioInputMutation = useMutation({
+    mutationFn: () => client.setAudioInput(station.username, {
+      type: audioInputType,
+      file: audioInputType === 'file' ? audioFile : undefined,
+    }),
+    onSuccess: () => { setSettingsMsg({ type: 'success', text: 'Audio input updated.' }); onMutate(); },
     onError: (e: Error) => setSettingsMsg({ type: 'error', text: e.message }),
   });
 
@@ -106,6 +142,9 @@ export default function StreamCard({ station, client, onMutate }: Props) {
             {station.isRelaying && <span className={styles.badgeRelaying}>RELAYING</span>}
             {station.isIngesting && <span className={styles.badgeIngesting}>INGESTING</span>}
           </div>
+          <span className={styles.audioInputLabel}>
+            {station.audioInput?.type === 'file' ? `File: ${station.audioInput.file}` : station.audioInput?.type ?? 'silence'}
+          </span>
         </div>
 
         {/* Right */}
@@ -119,7 +158,17 @@ export default function StreamCard({ station, client, onMutate }: Props) {
             Monitor
           </button>
 
-          {station.isLive && (
+          {!station.isLive && !station.isIngesting && (
+            <button
+              className={styles.btnPrimary}
+              onClick={() => startStreamMutation.mutate()}
+              disabled={startStreamMutation.isPending}
+            >
+              Start Stream
+            </button>
+          )}
+
+          {(station.isLive || station.isIngesting) && (
             <button
               className={styles.btnIconDanger}
               onClick={() => stopMutation.mutate()}
@@ -127,6 +176,16 @@ export default function StreamCard({ station, client, onMutate }: Props) {
               title="Stop stream"
             >
               <StopIcon />
+            </button>
+          )}
+
+          {!station.isStatic && onDelete && (
+            <button
+              className={styles.btnIconDanger}
+              onClick={onDelete}
+              title="Delete channel"
+            >
+              <TrashIcon />
             </button>
           )}
 
@@ -150,6 +209,60 @@ export default function StreamCard({ station, client, onMutate }: Props) {
       {/* Settings section */}
       {showSettings && (
         <div className={styles.sectionSettings}>
+          {/* Stream */}
+          <div className={styles.settingsGroup}>
+            <p className={styles.settingsGroupTitle}>Stream</p>
+            {station.isLive ? (
+              <button
+                className={styles.btnDanger}
+                onClick={() => stopMutation.mutate()}
+                disabled={stopMutation.isPending}
+              >
+                Stop Stream
+              </button>
+            ) : (
+              <button
+                className={styles.btnPrimary}
+                onClick={() => startStreamMutation.mutate()}
+                disabled={startStreamMutation.isPending}
+              >
+                Start Stream
+              </button>
+            )}
+          </div>
+
+          {/* Audio Input */}
+          <div className={styles.settingsGroup}>
+            <p className={styles.settingsGroupTitle}>Audio Input</p>
+            <div className={styles.inputRow}>
+              <select
+                className={styles.input}
+                value={audioInputType}
+                onChange={e => setAudioInputType(e.target.value as AudioInputType)}
+              >
+                <option value="silence">Silence</option>
+                <option value="test_tone">Test Tone (440 Hz)</option>
+                <option value="file">Audio File</option>
+              </select>
+              {audioInputType === 'file' && (
+                <input
+                  className={styles.input}
+                  type="text"
+                  placeholder="/path/to/audio.mp3"
+                  value={audioFile}
+                  onChange={e => setAudioFile(e.target.value)}
+                />
+              )}
+              <button
+                className={styles.btnPrimary}
+                onClick={() => setAudioInputMutation.mutate()}
+                disabled={setAudioInputMutation.isPending}
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+
           {/* Relay */}
           <div className={styles.settingsGroup}>
             <p className={styles.settingsGroupTitle}>Relay</p>
@@ -193,22 +306,13 @@ export default function StreamCard({ station, client, onMutate }: Props) {
                 Stop Ingest
               </button>
             ) : (
-              <div className={styles.inputRow}>
-                <input
-                  className={styles.input}
-                  type="text"
-                  placeholder="/path/to/audio.mp3 (optional, leave blank for test tone)"
-                  value={audioFile}
-                  onChange={e => setAudioFile(e.target.value)}
-                />
-                <button
-                  className={styles.btnPrimary}
-                  onClick={() => startIngestMutation.mutate()}
-                  disabled={startIngestMutation.isPending}
-                >
-                  Start Ingest
-                </button>
-              </div>
+              <button
+                className={styles.btnPrimary}
+                onClick={() => startIngestMutation.mutate()}
+                disabled={startIngestMutation.isPending}
+              >
+                Start Ingest
+              </button>
             )}
           </div>
 

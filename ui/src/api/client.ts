@@ -1,3 +1,10 @@
+export type AudioInputType = 'silence' | 'test_tone' | 'file';
+
+export interface AudioInput {
+  type: AudioInputType;
+  file?: string;
+}
+
 export interface StationStatus {
   username: string;
   isLive: boolean;
@@ -5,6 +12,8 @@ export interface StationStatus {
   listenerCount: number;
   isRelaying: boolean;
   isIngesting: boolean;
+  audioInput: AudioInput;
+  isStatic: boolean;
 }
 
 export class AdminClient {
@@ -59,6 +68,36 @@ export class AdminClient {
 
   async stopIngest(username: string): Promise<void> {
     const r = await fetch(`${this.baseURL}/admin/stations/${username}/ingest/stop`, { method: 'POST', headers: this.headers() });
+    if (!r.ok) throw new Error(await r.text());
+  }
+
+  async createChannel(data: {
+    username: string;
+    name?: string;
+    summary?: string;
+    relay_policy?: string;
+    license_territory?: string[];
+  }): Promise<StationStatus> {
+    const r = await fetch(`${this.baseURL}/admin/channels`, {
+      method: 'POST', headers: this.headers(),
+      body: JSON.stringify(data),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  async deleteChannel(username: string): Promise<void> {
+    const r = await fetch(`${this.baseURL}/admin/channels/${username}`, {
+      method: 'DELETE', headers: this.headers(),
+    });
+    if (!r.ok) throw new Error(await r.text());
+  }
+
+  async setAudioInput(username: string, input: AudioInput): Promise<void> {
+    const r = await fetch(`${this.baseURL}/admin/stations/${username}/ingest/input`, {
+      method: 'POST', headers: this.headers(),
+      body: JSON.stringify(input),
+    });
     if (!r.ok) throw new Error(await r.text());
   }
 }

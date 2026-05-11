@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
 import StreamCard from '../../components/admin/StreamCard';
-import StartStreamModal from '../../components/admin/StartStreamModal';
+import CreateChannelModal from '../../components/admin/CreateChannelModal';
 import styles from './StreamsPage.module.css';
 
 function PlusIcon() {
@@ -31,6 +31,11 @@ export default function StreamsPage() {
     return a.isLive ? -1 : 1;
   });
 
+  const deleteChannelMutation = useMutation({
+    mutationFn: (username: string) => client!.deleteChannel(username),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['stations'] }),
+  });
+
   function handleMutate() {
     queryClient.invalidateQueries({ queryKey: ['stations'] });
   }
@@ -46,7 +51,7 @@ export default function StreamsPage() {
         </div>
         <button className={styles.btnNewStream} onClick={() => setShowModal(true)}>
           <PlusIcon />
-          Start New Stream
+          Create New Channel
         </button>
       </div>
 
@@ -60,23 +65,27 @@ export default function StreamsPage() {
         <p className={styles.emptyState}>No stations configured.</p>
       ) : (
         <div className={styles.stationList}>
-          {sorted.map(station => (
+          {sorted.map(s => (
             <StreamCard
-              key={station.username}
-              station={station}
+              key={s.username}
+              station={s}
               client={client}
               onMutate={handleMutate}
+              onDelete={!s.isStatic ? () => {
+                if (window.confirm(`Delete channel "${s.username}"? This cannot be undone.`)) {
+                  deleteChannelMutation.mutate(s.username);
+                }
+              } : undefined}
             />
           ))}
         </div>
       )}
 
       {showModal && (
-        <StartStreamModal
-          stations={stations}
+        <CreateChannelModal
           client={client}
           onClose={() => setShowModal(false)}
-          onSuccess={handleMutate}
+          onSuccess={() => { queryClient.invalidateQueries({ queryKey: ['stations'] }); setShowModal(false); }}
         />
       )}
     </div>

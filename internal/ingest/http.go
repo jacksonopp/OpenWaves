@@ -1,31 +1,31 @@
 package ingest
 
 import (
-"crypto/rsa"
 "fmt"
 "sync"
 "sync/atomic"
 
 "github.com/jacksonopp/openwaves/internal/hls"
+"github.com/jacksonopp/openwaves/internal/keystore"
 )
 
 // SegmentIngestor accepts pre-made .ts segments, signs them, and stores them in the HLS store.
 // FFmpeg runs on the broadcaster's machine; this server only handles signing and serving.
 type SegmentIngestor struct {
-store    *hls.Store
-privKeys map[string]*rsa.PrivateKey
-seqNums  sync.Map // username → *int64
+store   *hls.Store
+ks      *keystore.Store
+seqNums sync.Map // username → *int64
 }
 
-// NewSegmentIngestor creates a SegmentIngestor backed by the given store and key map.
-func NewSegmentIngestor(store *hls.Store, privKeys map[string]*rsa.PrivateKey) *SegmentIngestor {
-return &SegmentIngestor{store: store, privKeys: privKeys}
+// NewSegmentIngestor creates a SegmentIngestor backed by the given store and key store.
+func NewSegmentIngestor(store *hls.Store, ks *keystore.Store) *SegmentIngestor {
+return &SegmentIngestor{store: store, ks: ks}
 }
 
 // AcceptSegment signs data and adds it to the store under the given filename.
 func (s *SegmentIngestor) AcceptSegment(username, filename string, data []byte) error {
-privKey, ok := s.privKeys[username]
-if !ok {
+privKey := s.ks.PrivateKey(username)
+if privKey == nil {
 return fmt.Errorf("no private key for station %s", username)
 }
 

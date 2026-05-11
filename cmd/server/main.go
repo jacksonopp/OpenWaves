@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -41,7 +40,7 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	privKeys, pubKeyPEMs := loadKeys(cfg)
+	ks := loadKeys(cfg)
 
 	store := hls.NewStore(10)
 
@@ -49,7 +48,7 @@ func main() {
 	log.SetOutput(io.MultiWriter(os.Stderr, logStream))
 
 	followerStore := inbox.NewFollowerStore()
-	relayMgr := relay.NewManager(store, privKeys)
+	relayMgr := relay.NewManager(store, ks)
 	bcMgr := broadcaster.NewManager()
 
 	router := mux.NewRouter()
@@ -66,9 +65,9 @@ func main() {
 
 	router.HandleFunc("/stations", publicStationsListHandler(cfg, store)).Methods(http.MethodGet)
 
-	router.HandleFunc("/stations/{username}", stationHandler(cfg, store, pubKeyPEMs)).Methods(http.MethodGet)
+	router.HandleFunc("/stations/{username}", stationHandler(cfg, store, ks)).Methods(http.MethodGet)
 
-	router.HandleFunc("/stations/{username}/ingest/{filename}", ingest.Handler(cfg, store, privKeys)).Methods(http.MethodPost)
+	router.HandleFunc("/stations/{username}/ingest/{filename}", ingest.Handler(cfg, store, ks)).Methods(http.MethodPost)
 
 	router.HandleFunc("/stations/{username}/hls/stream.m3u8", hls.ManifestHandler(cfg, store, 6)).Methods(http.MethodGet)
 
@@ -78,7 +77,7 @@ func main() {
 
 	router.HandleFunc("/stations/{username}/inbox", inbox.Handler(cfg, followerStore, nil)).Methods(http.MethodPost)
 
-	router.PathPrefix("/admin").Handler(admin.Handler(cfg, store, followerStore, relayMgr, logStream, bcMgr))
+	router.PathPrefix("/admin").Handler(admin.Handler(cfg, store, followerStore, relayMgr, logStream, bcMgr, ks))
 
 	router.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
@@ -90,18 +89,14 @@ func main() {
 	}
 }
 
-func loadKeys(cfg *config.Config) (map[string]*rsa.PrivateKey, map[string]string) {
-	privKeys := make(map[string]*rsa.PrivateKey)
-	pubKeyPEMs := make(map[string]string)
+func loadKeys(cfg *config.Config) *keystore.Store {
+	ks := keystore.NewStore(cfg.KeysDir)
 	for _, station := range cfg.Stations {
-		priv, pubPEM, err := keystore.LoadOrGenerate(station.Username, cfg.KeysDir)
-		if err != nil {
+		if err := ks.Load(station.Username); err != nil {
 			log.Fatalf("failed to load key for station %s: %v", station.Username, err)
 		}
-		privKeys[station.Username] = priv
-		pubKeyPEMs[station.Username] = pubPEM
 	}
-	return privKeys, pubKeyPEMs
+	return ks
 }
 
 func publicStationsListHandler(cfg *config.Config, store *hls.Store) http.HandlerFunc {
@@ -137,7 +132,7 @@ func publicStationsListHandler(cfg *config.Config, store *hls.Store) http.Handle
 	}
 }
 
-func stationHandler(cfg *config.Config, store *hls.Store, pubKeyPEMs map[string]string) http.HandlerFunc {
+func stationHandler(cfg *config.Config, store *hls.Store, ks *keystore.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		username := mux.Vars(r)["username"]
 		if username == "" {
@@ -171,7 +166,7 @@ func stationHandler(cfg *config.Config, store *hls.Store, pubKeyPEMs map[string]
 		s.PublicKey = actor.PublicKey{
 			ID:           base + "#main-key",
 			Owner:        base,
-			PublicKeyPem: pubKeyPEMs[username],
+			PublicKeyPem: ks.PublicKeyPEM(username),
 		}
 		s.StationURI = fmt.Sprintf("openwaves://%s@%s", username, cfg.Domain)
 

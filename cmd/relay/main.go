@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/rsa"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -50,16 +49,14 @@ func main() {
 		},
 	}
 
-	privKey, pubKeyPEM, err := keystore.LoadOrGenerate(username, keysDir)
-	if err != nil {
+	ks := keystore.NewStore(keysDir)
+	if err := ks.Load(username); err != nil {
 		log.Fatalf("failed to load/generate key: %v", err)
 	}
-	privKeys := map[string]*rsa.PrivateKey{username: privKey}
-	pubKeyPEMs := map[string]string{username: pubKeyPEM}
 
 	store := hls.NewStore(10)
 	followerStore := inbox.NewFollowerStore()
-	relayMgr := relay.NewManager(store, privKeys)
+	relayMgr := relay.NewManager(store, ks)
 
 	selfURL := cfg.BaseURL() + "/stations/" + username
 	if err := relayMgr.StartRelay(username, sourceURL, selfURL); err != nil {
@@ -71,7 +68,7 @@ func main() {
 	router := mux.NewRouter()
 
 	// Station actor — so the source can fetch our public key for verification
-	router.HandleFunc("/stations/{username}", stationActorHandler(cfg, store, pubKeyPEMs)).Methods(http.MethodGet)
+	router.HandleFunc("/stations/{username}", stationActorHandler(cfg, store, ks)).Methods(http.MethodGet)
 
 	// Inbox — receives ProofOfListen ACKs, Follow, TerminateStream, etc.
 	// TerminateStream from the source stops the local relay session.
@@ -109,7 +106,7 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-func stationActorHandler(cfg *config.Config, store *hls.Store, pubKeyPEMs map[string]string) http.HandlerFunc {
+func stationActorHandler(cfg *config.Config, store *hls.Store, ks *keystore.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		username := mux.Vars(r)["username"]
 		registry := cfg.Registry()
@@ -118,6 +115,7 @@ func stationActorHandler(cfg *config.Config, store *hls.Store, pubKeyPEMs map[st
 			return
 		}
 
+		pubPEM := ks.PublicKeyPEM(username)
 		base := cfg.BaseURL() + "/stations/" + username
 		actor := map[string]interface{}{
 			"@context":          []string{"https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"},
@@ -129,7 +127,7 @@ func stationActorHandler(cfg *config.Config, store *hls.Store, pubKeyPEMs map[st
 			"publicKey": map[string]string{
 				"id":           base + "#main-key",
 				"owner":        base,
-				"publicKeyPem": pubKeyPEMs[username],
+				"publicKeyPem": pubPEM,
 			},
 		}
 

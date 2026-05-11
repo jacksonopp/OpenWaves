@@ -2,8 +2,6 @@ package ingest
 
 import (
 "bytes"
-"crypto/rand"
-"crypto/rsa"
 "net/http"
 "net/http/httptest"
 "testing"
@@ -11,21 +9,25 @@ import (
 "github.com/gorilla/mux"
 "github.com/jacksonopp/openwaves/internal/config"
 "github.com/jacksonopp/openwaves/internal/hls"
+"github.com/jacksonopp/openwaves/internal/keystore"
 )
 
-func newTestRouter(cfg *config.Config, store *hls.Store, privKeys map[string]*rsa.PrivateKey) *mux.Router {
+func newTestRouter(cfg *config.Config, store *hls.Store, ks *keystore.Store) *mux.Router {
 r := mux.NewRouter()
-r.Handle("/stations/{username}/ingest/{filename}", Handler(cfg, store, privKeys)).Methods(http.MethodPost)
+r.Handle("/stations/{username}/ingest/{filename}", Handler(cfg, store, ks)).Methods(http.MethodPost)
 return r
 }
 
-func generateKey(t *testing.T) *rsa.PrivateKey {
+// newTestStore creates a keystore.Store with keys generated for each username.
+func newTestStore(t *testing.T, usernames ...string) *keystore.Store {
 t.Helper()
-key, err := rsa.GenerateKey(rand.Reader, 2048)
-if err != nil {
-t.Fatalf("rsa.GenerateKey: %v", err)
+ks := keystore.NewStore(t.TempDir())
+for _, u := range usernames {
+if err := ks.Load(u); err != nil {
+t.Fatalf("keystore.Load(%q): %v", u, err)
 }
-return key
+}
+return ks
 }
 
 func TestHandler_MethodNotAllowed(t *testing.T) {
@@ -35,9 +37,9 @@ Scheme:       "https",
 Registration: config.AdminOnly,
 }
 store := hls.NewStore(10)
-privKeys := map[string]*rsa.PrivateKey{}
+ks := newTestStore(t)
 
-r := newTestRouter(cfg, store, privKeys)
+r := newTestRouter(cfg, store, ks)
 req := httptest.NewRequest(http.MethodGet, "/stations/alice/ingest/seg0001.ts", nil)
 rr := httptest.NewRecorder()
 r.ServeHTTP(rr, req)
@@ -55,9 +57,9 @@ Registration: config.AdminOnly,
 Stations:     []config.StationConfig{{Username: "alice"}},
 }
 store := hls.NewStore(10)
-privKeys := map[string]*rsa.PrivateKey{}
+ks := newTestStore(t)
 
-r := newTestRouter(cfg, store, privKeys)
+r := newTestRouter(cfg, store, ks)
 req := httptest.NewRequest(http.MethodPost, "/stations/unknown/ingest/seg0001.ts", bytes.NewReader([]byte("data")))
 rr := httptest.NewRecorder()
 r.ServeHTTP(rr, req)
@@ -74,9 +76,9 @@ Scheme:       "https",
 Registration: config.Open,
 }
 store := hls.NewStore(10)
-privKeys := map[string]*rsa.PrivateKey{} // no key for "unknown" → 500
+ks := newTestStore(t) // no key for "unknown" → 500
 
-r := newTestRouter(cfg, store, privKeys)
+r := newTestRouter(cfg, store, ks)
 req := httptest.NewRequest(http.MethodPost, "/stations/unknown/ingest/seg0001.ts", bytes.NewReader([]byte("data")))
 rr := httptest.NewRecorder()
 r.ServeHTTP(rr, req)
@@ -94,9 +96,9 @@ Registration: config.AdminOnly,
 Stations:     []config.StationConfig{{Username: "alice"}},
 }
 store := hls.NewStore(10)
-privKeys := map[string]*rsa.PrivateKey{"alice": generateKey(t)}
+ks := newTestStore(t, "alice")
 
-r := newTestRouter(cfg, store, privKeys)
+r := newTestRouter(cfg, store, ks)
 
 for _, bad := range []string{"seg0001.mp4", "seg0001.ts.gz", "seg0001"} {
 req := httptest.NewRequest(http.MethodPost, "/stations/alice/ingest/"+bad, bytes.NewReader([]byte("data")))
@@ -116,9 +118,9 @@ Registration: config.AdminOnly,
 Stations:     []config.StationConfig{{Username: "alice"}},
 }
 store := hls.NewStore(10)
-privKeys := map[string]*rsa.PrivateKey{"alice": generateKey(t)}
+ks := newTestStore(t, "alice")
 
-r := newTestRouter(cfg, store, privKeys)
+r := newTestRouter(cfg, store, ks)
 body := bytes.NewReader([]byte("fake-ts-data"))
 req := httptest.NewRequest(http.MethodPost, "/stations/alice/ingest/seg0001.ts", body)
 rr := httptest.NewRecorder()
@@ -148,9 +150,9 @@ func TestHandler_IngestKey_Valid(t *testing.T) {
 		Stations:     []config.StationConfig{{Username: "alice", IngestKey: "secret"}},
 	}
 	store := hls.NewStore(10)
-	privKeys := map[string]*rsa.PrivateKey{"alice": generateKey(t)}
+	ks := newTestStore(t, "alice")
 
-	r := newTestRouter(cfg, store, privKeys)
+	r := newTestRouter(cfg, store, ks)
 	body := bytes.NewReader([]byte("fake-ts-data"))
 	req := httptest.NewRequest(http.MethodPost, "/stations/alice/ingest/seg0001.ts", body)
 	req.Header.Set("Authorization", "Bearer secret")
@@ -170,9 +172,9 @@ func TestHandler_IngestKey_Missing(t *testing.T) {
 		Stations:     []config.StationConfig{{Username: "alice", IngestKey: "secret"}},
 	}
 	store := hls.NewStore(10)
-	privKeys := map[string]*rsa.PrivateKey{"alice": generateKey(t)}
+	ks := newTestStore(t, "alice")
 
-	r := newTestRouter(cfg, store, privKeys)
+	r := newTestRouter(cfg, store, ks)
 	body := bytes.NewReader([]byte("fake-ts-data"))
 	req := httptest.NewRequest(http.MethodPost, "/stations/alice/ingest/seg0001.ts", body)
 	rr := httptest.NewRecorder()
@@ -185,8 +187,7 @@ func TestHandler_IngestKey_Missing(t *testing.T) {
 
 func TestSegmentIngestor_Stop(t *testing.T) {
 store := hls.NewStore(10)
-privKeys := map[string]*rsa.PrivateKey{}
-ingestor := NewSegmentIngestor(store, privKeys)
+ingestor := NewSegmentIngestor(store, newTestStore(t))
 
 store.Add("alice", hls.Segment{Filename: "seg0000.ts", Data: []byte("data"), SeqNum: 0})
 if segs := store.Segments("alice"); len(segs) != 1 {

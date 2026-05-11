@@ -11,11 +11,12 @@ import (
 	"github.com/jacksonopp/openwaves/internal/config"
 	"github.com/jacksonopp/openwaves/internal/hls"
 	"github.com/jacksonopp/openwaves/internal/inbox"
+	"github.com/jacksonopp/openwaves/internal/keystore"
 	"github.com/jacksonopp/openwaves/internal/logstream"
 	"github.com/jacksonopp/openwaves/internal/relay"
 )
 
-func testSetup() (*config.Config, *hls.Store, *inbox.FollowerStore, *relay.Manager, *logstream.Stream, *broadcaster.Manager) {
+func testSetup() (*config.Config, *hls.Store, *inbox.FollowerStore, *relay.Manager, *logstream.Stream, *broadcaster.Manager, *keystore.Store) {
 	cfg := &config.Config{
 		Domain:   "example.com",
 		Scheme:   "http",
@@ -26,10 +27,11 @@ func testSetup() (*config.Config, *hls.Store, *inbox.FollowerStore, *relay.Manag
 	}
 	store := hls.NewStore(10)
 	followerStore := inbox.NewFollowerStore()
-	relayMgr := relay.NewManager(store, nil)
+	ks := keystore.NewStore("")
+	relayMgr := relay.NewManager(store, ks)
 	stream := logstream.New()
 	bcMgr := broadcaster.NewManager()
-	return cfg, store, followerStore, relayMgr, stream, bcMgr
+	return cfg, store, followerStore, relayMgr, stream, bcMgr, ks
 }
 
 func doRequest(h http.Handler, method, path string, body []byte, key string) *httptest.ResponseRecorder {
@@ -50,9 +52,9 @@ func doRequest(h http.Handler, method, path string, body []byte, key string) *ht
 
 // 1. Admin disabled (empty AdminKey) → GET /admin/stations → 403
 func TestAdminDisabled(t *testing.T) {
-	cfg, store, followerStore, relayMgr, stream, bcMgr := testSetup()
+	cfg, store, followerStore, relayMgr, stream, bcMgr, ks := testSetup()
 	cfg.AdminKey = ""
-	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr)
+	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr, ks)
 
 	rr := doRequest(h, http.MethodGet, "/admin/stations", nil, "")
 	if rr.Code != http.StatusForbidden {
@@ -62,8 +64,8 @@ func TestAdminDisabled(t *testing.T) {
 
 // 2. Wrong key → 401
 func TestWrongKey(t *testing.T) {
-	cfg, store, followerStore, relayMgr, stream, bcMgr := testSetup()
-	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr)
+	cfg, store, followerStore, relayMgr, stream, bcMgr, ks := testSetup()
+	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr, ks)
 
 	rr := doRequest(h, http.MethodGet, "/admin/stations", nil, "wrong-key")
 	if rr.Code != http.StatusUnauthorized {
@@ -73,8 +75,8 @@ func TestWrongKey(t *testing.T) {
 
 // 3. Correct key → GET /admin/stations → 200, JSON with station list
 func TestListStations(t *testing.T) {
-	cfg, store, followerStore, relayMgr, stream, bcMgr := testSetup()
-	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr)
+	cfg, store, followerStore, relayMgr, stream, bcMgr, ks := testSetup()
+	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr, ks)
 
 	rr := doRequest(h, http.MethodGet, "/admin/stations", nil, "test-key")
 	if rr.Code != http.StatusOK {
@@ -95,9 +97,9 @@ func TestListStations(t *testing.T) {
 
 // 4. GET /admin/stations/{username} → correct status
 func TestGetStation(t *testing.T) {
-	cfg, store, followerStore, relayMgr, stream, bcMgr := testSetup()
+	cfg, store, followerStore, relayMgr, stream, bcMgr, ks := testSetup()
 	store.Add("alice", hls.Segment{Filename: "seg0.ts", SeqNum: 0})
-	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr)
+	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr, ks)
 
 	rr := doRequest(h, http.MethodGet, "/admin/stations/alice", nil, "test-key")
 	if rr.Code != http.StatusOK {
@@ -121,8 +123,8 @@ func TestGetStation(t *testing.T) {
 
 // 5. GET /admin/stations/nonexistent → 404
 func TestGetStationNotFound(t *testing.T) {
-	cfg, store, followerStore, relayMgr, stream, bcMgr := testSetup()
-	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr)
+	cfg, store, followerStore, relayMgr, stream, bcMgr, ks := testSetup()
+	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr, ks)
 
 	rr := doRequest(h, http.MethodGet, "/admin/stations/nonexistent", nil, "test-key")
 	if rr.Code != http.StatusNotFound {
@@ -132,9 +134,9 @@ func TestGetStationNotFound(t *testing.T) {
 
 // 6. POST /admin/stations/{username}/stream/stop → 200, store cleared
 func TestStopStream(t *testing.T) {
-	cfg, store, followerStore, relayMgr, stream, bcMgr := testSetup()
+	cfg, store, followerStore, relayMgr, stream, bcMgr, ks := testSetup()
 	store.Add("alice", hls.Segment{Filename: "seg0.ts", SeqNum: 0})
-	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr)
+	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr, ks)
 
 	rr := doRequest(h, http.MethodPost, "/admin/stations/alice/stream/stop", nil, "test-key")
 	if rr.Code != http.StatusOK {
@@ -147,9 +149,9 @@ func TestStopStream(t *testing.T) {
 
 // 7. POST /admin/stations/{username}/stream/start → 200
 func TestStartStream(t *testing.T) {
-	cfg, store, followerStore, relayMgr, stream, bcMgr := testSetup()
+	cfg, store, followerStore, relayMgr, stream, bcMgr, ks := testSetup()
 	store.Add("alice", hls.Segment{Filename: "seg0.ts", SeqNum: 0})
-	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr)
+	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr, ks)
 
 	rr := doRequest(h, http.MethodPost, "/admin/stations/alice/stream/start", nil, "test-key")
 	if rr.Code != http.StatusOK {
@@ -170,8 +172,8 @@ func TestStartRelay(t *testing.T) {
 	}))
 	defer sourceSrv.Close()
 
-	cfg, store, followerStore, relayMgr, stream, bcMgr := testSetup()
-	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr)
+	cfg, store, followerStore, relayMgr, stream, bcMgr, ks := testSetup()
+	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr, ks)
 
 	body, _ := json.Marshal(map[string]string{"source_url": sourceSrv.URL})
 	rr := doRequest(h, http.MethodPost, "/admin/stations/alice/relay/start", body, "test-key")
@@ -182,8 +184,8 @@ func TestStartRelay(t *testing.T) {
 
 // 9. POST /admin/stations/{username}/relay/start missing source_url → 400
 func TestStartRelayMissingSourceURL(t *testing.T) {
-	cfg, store, followerStore, relayMgr, stream, bcMgr := testSetup()
-	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr)
+	cfg, store, followerStore, relayMgr, stream, bcMgr, ks := testSetup()
+	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr, ks)
 
 	body, _ := json.Marshal(map[string]string{})
 	rr := doRequest(h, http.MethodPost, "/admin/stations/alice/relay/start", body, "test-key")
@@ -194,8 +196,8 @@ func TestStartRelayMissingSourceURL(t *testing.T) {
 
 // 10. POST /admin/stations/{username}/relay/stop → 200
 func TestStopRelay(t *testing.T) {
-	cfg, store, followerStore, relayMgr, stream, bcMgr := testSetup()
-	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr)
+	cfg, store, followerStore, relayMgr, stream, bcMgr, ks := testSetup()
+	h := Handler(cfg, store, followerStore, relayMgr, stream, bcMgr, ks)
 
 	rr := doRequest(h, http.MethodPost, "/admin/stations/alice/relay/stop", nil, "test-key")
 	if rr.Code != http.StatusOK {
