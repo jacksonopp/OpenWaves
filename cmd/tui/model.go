@@ -115,11 +115,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case inputRelaySource:
 					cmds = append(cmds, doStartRelay(m.client, username, val))
 				case inputAudioInput:
-					if err := m.runner.Start(username, m.serverURL, val); err != nil {
-						m.err = err
-					} else {
-						cmds = append(cmds, func() tea.Msg { return statusMsg("broadcast started") })
-					}
+					cmds = append(cmds, doChangeInput(m.client, m.runner, username, m.serverURL, val))
 				}
 			default:
 				var tiCmd tea.Cmd
@@ -142,11 +138,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case 0: // use script default
 					if len(m.stations) > 0 {
 						username := m.stations[m.selected].Username
-						if err := m.runner.Start(username, m.serverURL, ""); err != nil {
-							m.err = err
-						} else {
-							cmds = append(cmds, func() tea.Msg { return statusMsg("broadcast started") })
-						}
+						cmds = append(cmds, doChangeInput(m.client, m.runner, username, m.serverURL, ""))
 					}
 					m.currentView = viewDetail
 				case 1: // browse for MP3
@@ -208,11 +200,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.currentView = viewDetail
 				if len(m.stations) > 0 {
 					username := m.stations[m.selected].Username
-					if err := m.runner.Start(username, m.serverURL, audioInput); err != nil {
-						m.err = err
-					} else {
-						cmds = append(cmds, func() tea.Msg { return statusMsg("broadcast started") })
-					}
+					cmds = append(cmds, doChangeInput(m.client, m.runner, username, m.serverURL, audioInput))
 				}
 			case "esc":
 				m.currentView = viewFileBrowser
@@ -330,5 +318,20 @@ func doStopRelay(client *api.Client, username string) tea.Cmd {
 			return errMsg(err)
 		}
 		return statusMsg("relay stopped")
+	}
+}
+
+// doChangeInput stops any existing local broadcast for the station, clears
+// the server-side HLS segment buffer, then starts a new broadcast with the
+// given audioInput. This forces HLS clients to resync to the new live edge.
+func doChangeInput(client *api.Client, runner *broadcast.Runner, station, serverURL, audioInput string) tea.Cmd {
+	return func() tea.Msg {
+		runner.Stop(station)
+		// Best-effort: clear server-side segments so HLS clients resync.
+		_ = client.ClearSegments(station)
+		if err := runner.Start(station, serverURL, audioInput); err != nil {
+			return errMsg(err)
+		}
+		return statusMsg("broadcast started")
 	}
 }

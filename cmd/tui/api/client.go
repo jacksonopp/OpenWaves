@@ -135,3 +135,14 @@ func (c *Client) StopRelay(username string) error {
 	resp.Body.Close()
 	return nil
 }
+
+// ClearSegments flushes the server-side HLS segment buffer for a station.
+// Call this before starting a new local broadcast so HLS clients resync.
+func (c *Client) ClearSegments(username string) error {
+	resp, err := c.do(http.MethodPost, "/admin/stations/"+username+"/hls/clear", nil)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
